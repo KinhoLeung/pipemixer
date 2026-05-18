@@ -35,10 +35,10 @@ void dict_free(struct dict *dict) {
 }
 
 static bool search(const struct dict *dict, const char *key, size_t *index) {
-    ssize_t l = 0, r = dict->size - 1;
+    ptrdiff_t l = 0, r = (ptrdiff_t)dict->size - 1;
 
     while (l <= r) {
-        const ssize_t m = l + (r - l) / 2;
+        const ptrdiff_t m = l + (r - l) / 2;
         const struct dict_item *item = &dict->items[m];
 
         const int cmp = strcmp(item->key, key);
