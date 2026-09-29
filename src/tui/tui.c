@@ -5,6 +5,7 @@
 #include <math.h>
 #include <wchar.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "tui/tui.h"
 #include "tui/pad.h"
@@ -16,6 +17,7 @@
 #include "macros.h"
 #include "eventloop.h"
 #include "pw/common.h"
+#include "pw/peak.h"
 
 #define FOR_EACH_TAB(var) for (int var = 0; var < tui.tabs_count; var++)
 
@@ -119,7 +121,7 @@ static void tui_tab_item_draw_node(const struct tui_tab_item *const item,
     const int usable_width = tui.term_width - 2; /* account for box borders */
     const int two_thirds_usable_width = usable_width / 3 * 2;
     /* 5 for channel name, 1 space, 3 volume, 1 space, 4 more for decorations = 14 */
-    const int volume_bar_width_max = two_thirds_usable_width - 14;
+    const int volume_bar_width_max = MAX(0, two_thirds_usable_width - 14);
     const int volume_bar_width = (volume_bar_width_max / 15) * 15;
     const int volume_area_width = volume_bar_width + 14;
     const int info_area_width = usable_width - volume_area_width - 1; /* leave a space */
@@ -180,12 +182,57 @@ static void tui_tab_item_draw_node(const struct tui_tab_item *const item,
             const int thresh = vol_int * volume_bar_width / 150;
             for (int j = 0; j < volume_bar_width; j++) {
                 cchar_t cc;
-                if (j % step == 0 && !muted) {
+                if (step > 0 && j % step == 0 && !muted) {
                     pair += 1;
                 }
                 setcchar(&cc, (j < thresh) ? config.bar_full_char : config.bar_empty_char,
                          0, pair, NULL);
                 mvwadd_wch(win, pos, volume_bar_start + j, &cc);
+            }
+        }
+
+        wattroff(win, A_DIM);
+    }
+
+    DRAW(PEAK) {
+        if (muted) {
+            wattron(win, A_DIM);
+        }
+
+        for (unsigned i = 0; i < d->n_channels; i++) {
+            const int pos = item->pos + i + 2;
+            const float level = peak_meter_level(d->meter, d->channels[i].name, i);
+            const float db = level > 0 ? 20.0f * log10f(level) : -INFINITY;
+            char value[8];
+            if (!d->meter || peak_meter_failed(d->meter)) {
+                snprintf(value, sizeof(value), "n/a");
+            } else if (level == 0) {
+                snprintf(value, sizeof(value), "-inf");
+            } else {
+                snprintf(value, sizeof(value), "%+4.0f", fmaxf(-99, fminf(99, db)));
+            }
+
+            if (info_area_width >= 14) {
+                const int meter_width = info_area_width - 13;
+                const float scaled = fmaxf(0, fminf(1, (db + 60.0f) / 60.0f));
+                const int filled = level > 0 ? MAX(1, (int)ceilf(scaled * meter_width)) : 0;
+
+                mvwaddstr(win, pos, info_area_start, "Pk [");
+                for (int j = 0; j < meter_width; j++) {
+                    const bool full = j < filled;
+                    const int pair = !full ? DEFAULT
+                                   : j >= meter_width * 9 / 10 ? RED
+                                   : j >= meter_width * 7 / 10 ? YELLOW : GREEN;
+                    cchar_t cc;
+                    setcchar(&cc, full ? config.bar_full_char : config.bar_empty_char,
+                             0, pair, NULL);
+                    mvwadd_wch(win, pos, info_area_start + 4 + j, &cc);
+                }
+                mvwprintw(win, pos, info_area_start + 4 + meter_width,
+                          "] %4s %2s", value,
+                          d->meter && !peak_meter_failed(d->meter) ? "dB" : "  ");
+            } else if (info_area_width >= 7) {
+                mvwprintw(win, pos, info_area_start, "Pk %4s", value);
             }
         }
 
@@ -442,6 +489,38 @@ static void tui_tab_item_draw(const struct tui_tab_item *const item,
     case TUI_TAB_ITEM_TYPE_DEVICE:
         tui_tab_item_draw_device(item, mask);
         break;
+    }
+}
+
+static void start_node_meter(struct tui_tab_item *item) {
+    if (item->type != TUI_TAB_ITEM_TYPE_NODE || item->tab_index != tui.tab_index
+        || item->as.node.n_channels == 0 || item->as.node.meter || !tui.peak_source) {
+        return;
+    }
+
+    struct tui_tab_item_node_data *d = &item->as.node;
+    const enum media_class class = node_media_class(d->node);
+    const bool capture_sink = class == AUDIO_SINK || class == STREAM_INPUT_AUDIO;
+    d->meter = peak_meter_create(node_meter_target(d->node), capture_sink,
+                                 class != AUDIO_SOURCE);
+}
+
+static void stop_node_meter(struct tui_tab_item *item) {
+    if (item->type == TUI_TAB_ITEM_TYPE_NODE) {
+        peak_meter_destroy(item->as.node.meter);
+        item->as.node.meter = NULL;
+    }
+}
+
+static void set_tab_meters(int tab_index, bool active) {
+    const struct tui_tab *tab = &tui.tabs[tab_index];
+    LIST_FOREACH(elem, &tab->items) {
+        struct tui_tab_item *item = CONTAINER_OF(elem, struct tui_tab_item, link);
+        if (active) {
+            start_node_meter(item);
+        } else {
+            stop_node_meter(item);
+        }
     }
 }
 
@@ -748,7 +827,9 @@ static void tui_set_tab_and_redraw(int new_tab_index) {
         return;
     }
 
+    set_tab_meters(tui.tab_index, false);
     tui.tab_index = new_tab_index;
+    set_tab_meters(tui.tab_index, true);
     redraw_current_tab();
     redraw_status_bar();
 
@@ -1085,7 +1166,8 @@ static void on_node_mute(struct node *node, bool muted, void *data) {
 
     d->muted = muted;
 
-    tui_tab_item_draw(item, TUI_TAB_ITEM_DRAW_CHANNELS | TUI_TAB_ITEM_DRAW_DECORATIONS);
+    tui_tab_item_draw(item, TUI_TAB_ITEM_DRAW_CHANNELS | TUI_TAB_ITEM_DRAW_DECORATIONS
+                            | TUI_TAB_ITEM_DRAW_PEAK);
     trigger_update();
 }
 
@@ -1156,9 +1238,14 @@ static void on_node_channels(struct node *node,
     struct tui_tab_item *item = data;
     struct tui_tab_item_node_data *d = &item->as.node;
 
+    if (d->n_channels != channel_count) {
+        stop_node_meter(item);
+    }
     d->n_channels = channel_count;
     d->channels = xreallocarray(d->channels, d->n_channels, sizeof(d->channels[0]));
-    if (d->focused_channel >= d->n_channels) {
+    if (d->n_channels == 0) {
+        d->focused_channel = 0;
+    } else if (d->focused_channel >= d->n_channels) {
         d->focused_channel = d->n_channels - 1;
     }
 
@@ -1167,6 +1254,7 @@ static void on_node_channels(struct node *node,
     }
 
     tui_tab_item_resize(item, d->n_channels + 3 + (bool)d->n_routes);
+    start_node_meter(item);
 
     if (item->tab_index == tui.tab_index) {
         redraw_current_tab();
@@ -1187,6 +1275,7 @@ static void on_node_props(struct node *node, const struct dict *props, void *dat
     wstring_clear(&d->description);
     wstring_printf(&d->description, L"%s", node_description ?: node_name);
 
+    start_node_meter(item);
     tui_tab_item_draw(item, TUI_TAB_ITEM_DRAW_DESCRIPTION);
     trigger_update();
 }
@@ -1197,6 +1286,7 @@ static void on_node_removed(struct node *node, void *data) {
 
     TRACE("tui_on_node_removed: id %d", d->id);
 
+    stop_node_meter(item);
     event_hook_release(item->hook);
     node_unref(&item->as.node.node);
 
@@ -1352,11 +1442,25 @@ static void on_resize_triggered(void *_, uint64_t _) {
     }
 }
 
-/*
- * Trying to optimize updates is brain damage and I don't wanna deal with it.
- * Instead just update after any event that might or might not cause a draw
- * and let ncurses figure out the rest, it's good at damage tracking
- */
+static void on_peak_timer(void *_, uint64_t _) {
+    bool changed = false;
+    const struct tui_tab *tab = &tui.tabs[tui.tab_index];
+
+    LIST_FOREACH(elem, &tab->items) {
+        struct tui_tab_item *item = CONTAINER_OF(elem, struct tui_tab_item, link);
+        if (item->type == TUI_TAB_ITEM_TYPE_NODE && item->as.node.meter
+            && peak_meter_step(item->as.node.meter)) {
+            tui_tab_item_draw(item, TUI_TAB_ITEM_DRAW_PEAK);
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        trigger_update();
+    }
+}
+
+/* Coalesce pad changes and let ncurses handle terminal damage tracking. */
 static void on_update_triggered(void *_, uint64_t _) {
     tui.update_triggered = false;
 
@@ -1422,6 +1526,19 @@ bool tui_init(void) {
     tui.update_source = pw_loop_add_event(event_loop, on_update_triggered, event_loop);
     tui.update_triggered = false;
 
+    tui.peak_source = pw_loop_add_timer(event_loop, on_peak_timer, NULL);
+    if (tui.peak_source) {
+        struct timespec interval = { .tv_sec = 0, .tv_nsec = 50000000 };
+        if (pw_loop_update_timer(event_loop, tui.peak_source,
+                                 &interval, &interval, false) < 0) {
+            WARN("failed to start peak meter timer");
+            pw_loop_destroy_source(event_loop, tui.peak_source);
+            tui.peak_source = NULL;
+        }
+    } else {
+        WARN("failed to create peak meter timer");
+    }
+
     tui.pipewire_hook = pipewire_add_listener(&pipewire_events, &tui);
 
     /* pick up initial terminal size */
@@ -1431,6 +1548,20 @@ bool tui_init(void) {
 }
 
 void tui_cleanup(void) {
+    if (!tui.tabs) {
+        return;
+    }
+
+    FOR_EACH_TAB(i) {
+        set_tab_meters(i, false);
+    }
+    if (tui.peak_source) {
+        pw_loop_destroy_source(event_loop, tui.peak_source);
+        tui.peak_source = NULL;
+    }
+    event_hook_release(tui.pipewire_hook);
+    tui.pipewire_hook = NULL;
+
     if (tui.bar_win != NULL) {
         delwin(tui.bar_win);
     }

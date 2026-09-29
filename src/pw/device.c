@@ -167,7 +167,7 @@ static void on_device_param_route(struct device *dev, const struct spa_pod *para
     spa_pod_parser_pod(&p, param);
     const int n =
         spa_pod_parser_get_object(&p,
-                                  SPA_TYPE_OBJECT_ParamRoute, &(pw_id_t){},
+                                  SPA_TYPE_OBJECT_ParamRoute, &(pw_id_t){0},
                                   SPA_PARAM_ROUTE_index, SPA_POD_Int(&index),
                                   SPA_PARAM_ROUTE_device, SPA_POD_Int(&device),
                                   SPA_PARAM_ROUTE_profile, SPA_POD_Int(&profile));
@@ -213,7 +213,7 @@ static void on_device_param_enum_route(struct device *dev, const struct spa_pod 
 
     const int n =
         spa_pod_parser_get_object(&p,
-                                  SPA_TYPE_OBJECT_ParamRoute, &(pw_id_t){},
+                                  SPA_TYPE_OBJECT_ParamRoute, &(pw_id_t){0},
                                   SPA_PARAM_ROUTE_name, SPA_POD_String(&name),
                                   SPA_PARAM_ROUTE_description, SPA_POD_String(&description),
                                   SPA_PARAM_ROUTE_index, SPA_POD_Int(&index),
@@ -255,7 +255,7 @@ static void on_device_param_enum_profile(struct device *dev, const struct spa_po
 
     const int n =
         spa_pod_parser_get_object(&p,
-                                  SPA_TYPE_OBJECT_ParamProfile, &(pw_id_t){},
+                                  SPA_TYPE_OBJECT_ParamProfile, &(pw_id_t){0},
                                   SPA_PARAM_PROFILE_name, SPA_POD_String(&name),
                                   SPA_PARAM_PROFILE_description, SPA_POD_String(&description),
                                   SPA_PARAM_PROFILE_index, SPA_POD_Int(&index));
@@ -283,7 +283,7 @@ static void on_device_param_profile(struct device *dev, const struct spa_pod *pa
 
     const int n =
         spa_pod_parser_get_object(&p,
-                                  SPA_TYPE_OBJECT_ParamProfile, &(pw_id_t){},
+                                  SPA_TYPE_OBJECT_ParamProfile, &(pw_id_t){0},
                                   SPA_PARAM_PROFILE_index, SPA_POD_Int(&index));
     if (n != 1) {
         ERROR("failed to get index from Profile");

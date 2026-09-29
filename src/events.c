@@ -143,7 +143,8 @@ int events_global_init(void) {
 }
 
 void events_dispatch(void) {
-    eventfd_read(g.efd, &(uint64_t){});
+    uint64_t eventfd_value;
+    eventfd_read(g.efd, &eventfd_value);
     g.efd_triggered = false;
 
     struct event *event;

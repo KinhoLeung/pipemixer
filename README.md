@@ -4,6 +4,9 @@ Heavily inspired by [pulsemixer] and [pwvucontrol].
 
 ![Screenshot](assets/screenshot.png)
 
+The channel rows show a live peak meter in dBFS beside the volume setting.
+Meters monitor only the selected tab and decay after playback stops.
+
 ## Building
 ```
 git clone https://github.com/heather7283/pipemixer

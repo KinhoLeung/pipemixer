@@ -196,8 +196,8 @@ int main(int argc, char **argv) {
     TRACE("leaving main loop");
 
 cleanup:
-    pipewire_cleanup();
     tui_cleanup();
+    pipewire_cleanup();
 
     /* see https://invisible-island.net/ncurses/man/curs_memleaks.3x.html */
     exit_curses(retcode);

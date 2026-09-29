@@ -7,6 +7,8 @@
 #include "collections/wstring.h"
 #include "events.h"
 
+struct peak_meter;
+
 enum tui_tab_type {
     PLAYBACK,
     RECORDING,
@@ -42,6 +44,7 @@ struct tui {
     struct spa_source *update_source;
     bool resize_triggered;
     struct spa_source *resize_source;
+    struct spa_source *peak_source;
 
     struct event_hook *pipewire_hook;
 };
@@ -57,6 +60,7 @@ enum tui_tab_item_draw_mask {
     TUI_TAB_ITEM_DRAW_PROFILES = 1 << 4,
     TUI_TAB_ITEM_DRAW_BORDERS = 1 << 5,
     TUI_TAB_ITEM_DRAW_BLANKS = 1 << 6,
+    TUI_TAB_ITEM_DRAW_PEAK = 1 << 7,
 };
 
 enum tui_tab_item_type {
@@ -79,6 +83,7 @@ struct tui_tab_item {
             struct wstring info, description;
 
             bool muted;
+            struct peak_meter *meter;
 
             unsigned n_channels;
             bool unlocked_channels;

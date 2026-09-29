@@ -18,13 +18,15 @@ enum media_class {
 
 struct node;
 
-struct node *node_create(struct pw_node *pw_node, uint32_t id, enum media_class media_class);
+struct node *node_create(struct pw_node *pw_node, uint32_t id,
+                         enum media_class media_class, const char *serial);
 
 struct node *node_ref(struct node *node);
 void node_unref(struct node **pnode);
 
 uint32_t node_id(const struct node *node);
 enum media_class node_media_class(const struct node *node);
+const char *node_meter_target(const struct node *node);
 
 #define ALL_CHANNELS ((uint32_t)-1)
 

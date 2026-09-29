@@ -25,6 +25,7 @@ struct node {
     struct spa_hook proxy_listener;
 
     uint32_t id;
+    char *serial;
     enum media_class media_class;
     struct dict props;
 
@@ -485,7 +486,7 @@ void on_node_param(void *data, int seq, uint32_t id, uint32_t index,
 
     const int n =
         spa_pod_parser_get_object(&p,
-                                  SPA_TYPE_OBJECT_Props, &(pw_id_t){},
+                                  SPA_TYPE_OBJECT_Props, &(pw_id_t){0},
                                   SPA_PROP_mute, SPA_POD_Bool(&mute),
                                   SPA_PROP_channelMap, SPA_POD_Array(&map_csize, &map_ctype,
                                                                      &map_nvals, &map_vals),
@@ -551,11 +552,13 @@ static const struct pw_proxy_events proxy_events = {
     .removed = on_proxy_removed,
 };
 
-struct node *node_create(struct pw_node *pw_node, uint32_t id, enum media_class media_class) {
+struct node *node_create(struct pw_node *pw_node, uint32_t id,
+                         enum media_class media_class, const char *serial) {
     struct node *node = xmalloc(sizeof(*node));
 
     *node = (struct node){
         .id = id,
+        .serial = xstrdup(serial),
         .pw_node = pw_node,
         .media_class = media_class,
         .refcnt = 1,
@@ -573,6 +576,7 @@ static void node_destroy(struct node *node) {
     pw_proxy_destroy(node->pw_proxy);
 
     dict_free(&node->props);
+    free(node->serial);
     param_props_free_contents(&node->param_props);
 
     for (unsigned i = 0; i < node->n_routes; i++) {
@@ -615,5 +619,9 @@ uint32_t node_id(const struct node *node) {
 
 enum media_class node_media_class(const struct node *node) {
     return node->media_class;
+}
+
+const char *node_meter_target(const struct node *node) {
+    return node->serial ?: dict_get(&node->props, "node.name");
 }
 

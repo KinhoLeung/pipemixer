@@ -3,6 +3,7 @@
 
 #include "pw/common.h"
 #include "pw/node.h"
+#include "pw/peak.h"
 #include "pw/device.h"
 #include "collections/map.h"
 #include "eventloop.h"
@@ -203,6 +204,13 @@ static void on_registry_global(void *data, uint32_t id, uint32_t permissions,
     DEBUG("registry global: id=%d, perms=0o%o, type=%s, ver=%d", id, permissions, type, version);
 
     if (streq(type, PW_TYPE_INTERFACE_Node)) {
+        const char *name = spa_dict_lookup(props, PW_KEY_NODE_NAME);
+        const char *suffix;
+        if (streq(spa_dict_lookup(props, PEAK_METER_NODE_PROPERTY), "true")
+            || (name && cut_prefix(name, PEAK_METER_NODE_PREFIX, &suffix))) {
+            return;
+        }
+
         const char *media_class = spa_dict_lookup(props, "media.class");
         enum media_class media_class_value;
         if (media_class == NULL) {
@@ -222,7 +230,8 @@ static void on_registry_global(void *data, uint32_t id, uint32_t permissions,
         }
 
         struct pw_node *pw_node = pw_registry_bind(pw.registry, id, type, PW_VERSION_NODE, 0);
-        struct node *node = node_create(pw_node, id, media_class_value);
+        struct node *node = node_create(pw_node, id, media_class_value,
+                                        spa_dict_lookup(props, PW_KEY_OBJECT_SERIAL));
         map_insert(&pw.nodes, id, node);
         emit_node(node, NULL);
     } else if (streq(type, PW_TYPE_INTERFACE_Device)) {
