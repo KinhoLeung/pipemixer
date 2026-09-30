@@ -7,6 +7,10 @@ Heavily inspired by [pulsemixer] and [pwvucontrol].
 The channel rows show a live peak meter in dBFS beside the volume setting.
 Meters monitor only the selected tab and decay after playback stops.
 
+On a playback or recording stream, press `c` to choose an output or input device.
+Choose `Follow default` to let PipeWire use the system default again.
+The device port menu remains on `p`.
+
 ## Building
 ```
 git clone https://github.com/heather7283/pipemixer
@@ -42,13 +46,15 @@ pipemixer get-default sink
 pipemixer set-default id:42
 pipemixer list-routes id:42
 pipemixer set-route id:42 1
+pipemixer set-target id:80 id:42
+pipemixer set-target id:80 default
 pipemixer list-profiles id:25
 pipemixer set-profile id:25 2
 ```
 
-Targets are exact `node.name` or `device.name` values, `id:N`, or `serial:N` for nodes. `list` shows the names and IDs to use. Volume is a percentage from 0 to 150; the optional channel uses names such as `FL` and `FR`. Query commands print text by default and accept `--json`. Mutation commands print nothing on success and wait for PipeWire to report the requested state. `--timeout MS` changes the default 5000 ms deadline.
+Targets are exact `node.name` or `device.name` values, `id:N`, or `serial:N` for nodes. For `set-target`, STREAM must be a playback or recording node, and DESTINATION must be a sink or source node of the corresponding kind. `list` shows the names and IDs to use. Volume is a percentage from 0 to 150; the optional channel uses names such as `FL` and `FR`. Query commands print text by default and accept `--json`. Mutation commands print nothing on success and wait for PipeWire to report the requested state. `--timeout MS` changes the default 5000 ms deadline.
 
-Exit status is 0 on success, 1 on a PipeWire error or timeout, 2 for invalid arguments, and 3 when the target, channel, route, or profile is unavailable. CLI commands do not require a config file unless one is given with `--config`.
+Exit status is 0 on success, 1 on a PipeWire error or timeout, 2 for invalid arguments, and 3 when the target, destination, channel, route, or profile is unavailable. CLI commands do not require a config file unless one is given with `--config`.
 
 ## Config
 pipemixer reads its config from `$XDG_CONFIG_HOME/pipemixer/pipemixer.ini`.

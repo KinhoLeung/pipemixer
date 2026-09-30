@@ -353,6 +353,8 @@ static bool parse_bind(struct parser_context ctx) {
         ADD_BIND(keycode, tui_bind_set_default, nothing, NOTHING);
     } else if (streq(ctx.key, "select-route")) {
         ADD_BIND(keycode, tui_bind_select_route, nothing, NOTHING);
+    } else if (streq(ctx.key, "select-target")) {
+        ADD_BIND(keycode, tui_bind_select_target, nothing, NOTHING);
     } else if (streq(ctx.key, "select-profile")) {
         ADD_BIND(keycode, tui_bind_select_profile, nothing, NOTHING);
     } else if (streq(ctx.key, "confirm-selection")) {

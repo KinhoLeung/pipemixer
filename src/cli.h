@@ -13,6 +13,7 @@ enum cli_command {
     CLI_SET_DEFAULT,
     CLI_LIST_ROUTES,
     CLI_SET_ROUTE,
+    CLI_SET_TARGET,
     CLI_LIST_PROFILES,
     CLI_SET_PROFILE,
 };
@@ -26,6 +27,7 @@ enum cli_mute_value {
 struct cli_request {
     enum cli_command command;
     const char *target;
+    const char *destination;
     const char *channel;
     bool devices;
     bool json;

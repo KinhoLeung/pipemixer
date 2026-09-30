@@ -77,6 +77,10 @@ List the routes of a node with their indices and active status.
 .B set-route TARGET INDEX
 Activate a listed route.
 .TP
+.B set-target STREAM DESTINATION|default
+Set the sink for a playback stream or the source for a recording stream.
+Use default to resume following the system default device.
+.TP
 .B list-profiles DEVICE
 List the profiles of an audio device with their indices and active status.
 .TP
@@ -91,7 +95,7 @@ unless one is supplied with
 .B --config.
 .PP
 Exit status: 0 for success, 1 for a PipeWire error or timeout, 2 for invalid
-arguments, and 3 for an unavailable target or state.
+arguments, and 3 for an unavailable target, destination, or state.
 
 .SH CONTROLS
 By default, pipemixer uses the following keybinds:
@@ -127,7 +131,11 @@ Toggle mute status.
 Toggle channel lock (affects whether volume changes apply to all channels).
 .TP
 .B p
-Show route selection menu.
+Show device port selection menu.
+.TP
+.B c
+Select the output device for a playback stream or the input device for a recording stream.
+The menu can also restore following the system default.
 .TP
 .B P
 Show profile selection menu.

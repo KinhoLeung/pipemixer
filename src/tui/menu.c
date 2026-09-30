@@ -82,12 +82,16 @@ void tui_menu_draw(const struct tui_menu *const menu) {
     }
 
     mvwaddnwstr(win, 0, 1, menu->header.data, menu->w - 2);
-    for (unsigned int i = 0; i < menu->n_items; i++) {
+    const unsigned int visible = menu->h > 2 ? (unsigned int)(menu->h - 2) : 0;
+    const unsigned int first = visible && menu->selected >= visible
+                             ? menu->selected - visible + 1 : 0;
+    for (unsigned int row = 0; row < visible && first + row < menu->n_items; row++) {
+        unsigned int i = first + row;
         if (i == menu->selected) {
             wattron(win, A_BOLD);
         }
 
-        mvwaddnwstr(win, 1 + i, 1, menu->items[i].wstr.data, menu->w - 2);
+        mvwaddnwstr(win, 1 + row, 1, menu->items[i].wstr.data, menu->w - 2);
 
         wattroff(win, A_BOLD);
     }

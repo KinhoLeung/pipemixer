@@ -1,3 +1,6 @@
+#include <errno.h>
+#include <stdlib.h>
+
 #include <pipewire/extensions/metadata.h>
 #include <spa/utils/json.h>
 
@@ -11,6 +14,18 @@
 #include "macros.h"
 #include "utils.h"
 #include "log.h"
+
+struct stream_target {
+    char *node;
+    char *object;
+};
+
+static void free_stream_target(struct stream_target *target) {
+    if (!target) return;
+    free(target->node);
+    free(target->object);
+    free(target);
+}
 
 struct pipewire {
     struct pw_loop *main_loop;
@@ -30,11 +45,12 @@ struct pipewire {
             struct pw_proxy *pw_proxy;
         };
         struct spa_hook listener, proxy_listener;
+        uint32_t id;
         char *properties[DEFAULT_METADATA_KEY_COUNT];
         bool roundtrip;
     } default_metadata;
 
-    struct map nodes, devices;
+    struct map nodes, devices, stream_targets;
 
     struct event_emitter *emitter;
 } pw = {0};
@@ -43,6 +59,7 @@ enum pipewire_event_types {
     PIPEWIRE_EVENT_NODE,
     PIPEWIRE_EVENT_DEVICE,
     PIPEWIRE_EVENT_DEFAULT,
+    PIPEWIRE_EVENT_STREAM_TARGET,
     PIPEWIRE_EVENT_SYNC,
     PIPEWIRE_EVENT_ERROR,
 };
@@ -74,6 +91,9 @@ static void pipewire_event_dispatcher(uint64_t id, union event_data data,
         EVENT_DISPATCH(table->default_, key, md->properties[key], callbacks_data);
         break;
     }
+    case PIPEWIRE_EVENT_STREAM_TARGET:
+        EVENT_DISPATCH(table->stream_target, (uint32_t)data.u, callbacks_data);
+        break;
     case PIPEWIRE_EVENT_SYNC:
         EVENT_DISPATCH(table->sync, (int)data.i, callbacks_data);
         break;
@@ -105,6 +125,10 @@ static void emit_device(struct device *dev, struct event_hook *hook) {
 
 static void emit_default(enum default_metadata_key key, struct event_hook *hook) {
     event_emit(pw.emitter, hook, PIPEWIRE_EVENT_DEFAULT, NULL, 'u', key);
+}
+
+static void emit_stream_target(uint32_t stream_id) {
+    event_emit(pw.emitter, NULL, PIPEWIRE_EVENT_STREAM_TARGET, NULL, 'u', stream_id);
 }
 
 struct event_hook *pipewire_add_listener(const struct pipewire_events *events, void *data) {
@@ -145,6 +169,13 @@ struct device *device_lookup(uint32_t id) {
     return device;
 }
 
+void pipewire_foreach_node(void (*callback)(struct node *node, void *data), void *data) {
+    struct node *node;
+    MAP_FOREACH(&pw.nodes, &node) {
+        callback(node, data);
+    }
+}
+
 static const char *default_metadata_key_str(enum default_metadata_key key) {
     static const char *const keys[] = {
         [DEFAULT_AUDIO_SINK] = "default.audio.sink",
@@ -181,12 +212,110 @@ bool pipewire_set_default(enum default_metadata_key key, const char *value) {
     return result >= 0;
 }
 
+bool pipewire_set_stream_target(uint32_t stream_id, uint32_t target_id) {
+    struct node *stream = map_get(&pw.nodes, stream_id);
+    if (!pw.default_metadata.pw_metadata || !stream) return false;
+
+    enum media_class target_class;
+    switch (node_media_class(stream)) {
+    case STREAM_OUTPUT_AUDIO: target_class = AUDIO_SINK; break;
+    case STREAM_INPUT_AUDIO: target_class = AUDIO_SOURCE; break;
+    default: return false;
+    }
+    if (target_id != PW_ID_ANY) {
+        struct node *target = map_get(&pw.nodes, target_id);
+        if (!target || node_media_class(target) != target_class) return false;
+    }
+
+    struct pw_metadata *md = pw.default_metadata.pw_metadata;
+    int result;
+    if (target_id == PW_ID_ANY) {
+        result = pw_metadata_set_property(md, stream_id, "target.object", "Spa:Id", "-1");
+        if (result < 0) return false;
+        result = pw_metadata_set_property(md, stream_id, "target.node", "Spa:Id", "-1");
+    } else {
+        /* The two keys can conflict, so clear an existing target.object first. */
+        result = pw_metadata_set_property(md, stream_id, "target.object", NULL, NULL);
+        if (result < 0) return false;
+        char value[32];
+        snprintf(value, sizeof(value), "%u", target_id);
+        result = pw_metadata_set_property(md, stream_id, "target.node", "Spa:Id", value);
+    }
+    return result >= 0;
+}
+
+uint32_t pipewire_get_stream_target(uint32_t stream_id) {
+    const struct stream_target *target = map_get(&pw.stream_targets, stream_id);
+    if (!target) return PW_ID_ANY;
+
+    if (target->node) {
+        char *end;
+        errno = 0;
+        unsigned long value = strtoul(target->node, &end, 10);
+        if (!errno && end != target->node && !*end && value < PW_ID_ANY) {
+            return (uint32_t)value;
+        }
+    }
+    if (target->object && strcmp(target->object, "-1") != 0) {
+        struct node *node;
+        struct node *stream = map_get(&pw.nodes, stream_id);
+        if (!stream) return PW_ID_ANY;
+        const enum media_class target_class =
+            node_media_class(stream) == STREAM_OUTPUT_AUDIO ? AUDIO_SINK : AUDIO_SOURCE;
+        MAP_FOREACH(&pw.nodes, &node) {
+            if (node_media_class(node) != target_class) continue;
+            const char *serial = node_meter_target(node);
+            const char *name = dict_get(node_properties(node), "node.name");
+            if (streq(target->object, serial) || streq(target->object, name)) {
+                return node_id(node);
+            }
+        }
+    }
+    return PW_ID_ANY;
+}
+
+bool pipewire_stream_target_matches(uint32_t stream_id, uint32_t target_id) {
+    const struct stream_target *target = map_get(&pw.stream_targets, stream_id);
+    if (!target) return target_id == PW_ID_ANY;
+
+    const bool object_default = !target->object || streq(target->object, "-1")
+                             || streq(target->object, "4294967295");
+    if (target_id != PW_ID_ANY) {
+        if (!object_default || !target->node) return false;
+        char *end;
+        errno = 0;
+        unsigned long value = strtoul(target->node, &end, 10);
+        return !errno && end != target->node && !*end && value == target_id;
+    }
+
+    const bool node_default = !target->node || streq(target->node, "-1")
+                           || streq(target->node, "4294967295");
+    return node_default && object_default;
+}
+
 static int on_default_metadata_property(void *data, uint32_t id, const char *key,
                                         const char *type, const char *val) {
     struct default_metadata *md = data;
 
     INFO("default metadata property id=%u key=%s type=%s val=%s",
          id, key ?: "(null)", type ?: "(null)", val ?: "(null)");
+
+    if (id != 0 && (!key || streq(key, "target.node") || streq(key, "target.object"))) {
+        struct stream_target *target = map_get(&pw.stream_targets, id);
+        if (!key) {
+            free_stream_target(map_remove(&pw.stream_targets, id));
+        } else {
+            if (!target) {
+                target = xcalloc(1, sizeof(*target));
+                map_insert(&pw.stream_targets, id, target);
+            }
+            char **field = streq(key, "target.node") ? &target->node : &target->object;
+            free(*field);
+            *field = xstrdup(val);
+        }
+        emit_stream_target(id);
+        return 0;
+    }
 
     if (!key) return 0;
 
@@ -289,12 +418,31 @@ static void on_registry_global(void *data, uint32_t id, uint32_t permissions,
 
         INFO("got default metadata, id %d", id);
         md->pw_metadata = pw_registry_bind(pw.registry, id, type, PW_VERSION_METADATA, 0);
+        md->id = id;
         pw_metadata_add_listener(md->pw_metadata, &md->listener,
                                  &default_metadata_events, md);
     }
 }
 
 static void on_registry_global_remove(void *data, uint32_t id) {
+    struct default_metadata *md = &pw.default_metadata;
+    if (md->pw_metadata && md->id == id) {
+        spa_hook_remove(&md->listener);
+        pw_proxy_destroy(md->pw_proxy);
+        md->pw_metadata = NULL;
+        md->id = 0;
+        for (unsigned i = 0; i < DEFAULT_METADATA_KEY_COUNT; i++) {
+            free(md->properties[i]);
+            md->properties[i] = NULL;
+            emit_default(i, NULL);
+        }
+        struct stream_target *target;
+        MAP_FOREACH(&pw.stream_targets, &target) free_stream_target(target);
+        map_free(&pw.stream_targets);
+        return;
+    }
+
+    free_stream_target(map_remove(&pw.stream_targets, id));
     struct node *node = map_remove(&pw.nodes, id);
     if (node) {
         TRACE("registry global_remove: found node %u", id);
@@ -365,6 +513,19 @@ bool pipewire_init(void) {
 }
 
 void pipewire_cleanup(void) {
+    struct stream_target *target;
+    MAP_FOREACH(&pw.stream_targets, &target) free_stream_target(target);
+    map_free(&pw.stream_targets);
+    struct default_metadata *md = &pw.default_metadata;
+    for (unsigned i = 0; i < DEFAULT_METADATA_KEY_COUNT; i++) {
+        free(md->properties[i]);
+        md->properties[i] = NULL;
+    }
+    if (md->pw_metadata) {
+        spa_hook_remove(&md->listener);
+        pw_proxy_destroy(md->pw_proxy);
+        md->pw_metadata = NULL;
+    }
     if (pw.registry != NULL) {
         pw_proxy_destroy((struct pw_proxy *)pw.registry);
     }

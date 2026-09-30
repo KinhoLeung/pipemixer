@@ -27,10 +27,18 @@ bool pipewire_set_default(enum default_metadata_key key, const char *value);
 bool pipewire_default_available(void);
 int pipewire_sync(void);
 
+/* A stream target is a sink for playback or a source for recording.
+ * PW_ID_ANY restores following the system default. */
+bool pipewire_set_stream_target(uint32_t stream_id, uint32_t target_id);
+uint32_t pipewire_get_stream_target(uint32_t stream_id);
+bool pipewire_stream_target_matches(uint32_t stream_id, uint32_t target_id);
+void pipewire_foreach_node(void (*callback)(struct node *node, void *data), void *data);
+
 struct pipewire_events {
     void (*node)(struct node *node, void *data);
     void (*device)(struct device *dev, void *data);
     void (*default_)(enum default_metadata_key key, const char *val, void *data);
+    void (*stream_target)(uint32_t stream_id, void *data);
     void (*sync)(int seq, void *data);
     void (*error)(int code, const char *message, void *data);
 };

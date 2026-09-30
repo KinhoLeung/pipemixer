@@ -5,6 +5,8 @@
 #include <math.h>
 #include <wchar.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #include "tui/tui.h"
@@ -889,6 +891,92 @@ void tui_bind_set_default(union tui_bind_data data) {
 
     const struct node *const node = focused->as.node.node;
     node_set_default(node);
+}
+
+static const char *target_node_label(const struct node *node) {
+    const struct dict *props = node_properties(node);
+    const char *description = dict_get(props, "node.description");
+    const char *name = dict_get(props, "node.name");
+    return description ?: name ?: "Unnamed device";
+}
+
+struct target_menu_candidates {
+    enum media_class media_class;
+    struct node **nodes;
+    unsigned count;
+};
+
+static void collect_target_node(struct node *node, void *data) {
+    struct target_menu_candidates *candidates = data;
+    if (node_media_class(node) != candidates->media_class) return;
+    candidates->nodes = xreallocarray(candidates->nodes, candidates->count + 1,
+                                     sizeof(candidates->nodes[0]));
+    candidates->nodes[candidates->count++] = node;
+}
+
+static int compare_target_nodes(const void *a, const void *b) {
+    const struct node *left = *(const struct node *const *)a;
+    const struct node *right = *(const struct node *const *)b;
+    int result = strcmp(target_node_label(left), target_node_label(right));
+    if (result) return result;
+    return (node_id(left) > node_id(right)) - (node_id(left) < node_id(right));
+}
+
+static void on_target_selection_done(struct tui_menu *menu, struct tui_menu_item *pick) {
+    const uint32_t stream_id = menu->data.uint;
+    const uint32_t target_id = pick->data.uint;
+    if (!pipewire_set_stream_target(stream_id, target_id)) {
+        WARN("failed to set target %u for stream %u", target_id, stream_id);
+    }
+    tui_menu_free(menu);
+    tui.menu_active = false;
+    redraw_current_tab();
+}
+
+void tui_bind_select_target(union tui_bind_data data) {
+    const struct tui_tab_item *focused = tui.tabs[tui.tab_index].focused;
+    if (!focused || focused->type != TUI_TAB_ITEM_TYPE_NODE || tui.menu_active
+        || !pipewire_default_available()) return;
+
+    const enum media_class stream_class = node_media_class(focused->as.node.node);
+    struct target_menu_candidates candidates = {0};
+    if (stream_class == STREAM_OUTPUT_AUDIO) {
+        candidates.media_class = AUDIO_SINK;
+    } else if (stream_class == STREAM_INPUT_AUDIO) {
+        candidates.media_class = AUDIO_SOURCE;
+    } else {
+        return;
+    }
+
+    pipewire_foreach_node(collect_target_node, &candidates);
+    if (candidates.count > 1) {
+        qsort(candidates.nodes, candidates.count, sizeof(candidates.nodes[0]),
+              compare_target_nodes);
+    }
+
+    tui.menu = tui_menu_create(candidates.count + 1);
+    tui.menu->callback = on_target_selection_done;
+    tui.menu->data.uint = focused->as.node.id;
+    tui_menu_resize(tui.menu, tui.term_width, tui.term_height);
+    wstring_printf(&tui.menu->header, L"Select %ls for %ls",
+                   stream_class == STREAM_OUTPUT_AUDIO ? L"output" : L"input",
+                   focused->as.node.description.data ?: L"stream");
+
+    struct tui_menu_item *item = &tui.menu->items[0];
+    wstring_printf(&item->wstr, L"Follow default %ls",
+                   stream_class == STREAM_OUTPUT_AUDIO ? L"output" : L"input");
+    item->data.uint = PW_ID_ANY;
+
+    const uint32_t current_target = pipewire_get_stream_target(focused->as.node.id);
+    for (unsigned i = 0; i < candidates.count; i++) {
+        const struct node *node = candidates.nodes[i];
+        item = &tui.menu->items[i + 1];
+        wstring_printf(&item->wstr, L"%s (id:%u)", target_node_label(node), node_id(node));
+        item->data.uint = node_id(node);
+        if (node_id(node) == current_target) tui.menu->selected = i + 1;
+    }
+    free(candidates.nodes);
+    tui.menu_active = true;
 }
 
 static void on_profile_selection_done(struct tui_menu *menu, struct tui_menu_item *pick) {

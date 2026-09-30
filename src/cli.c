@@ -174,6 +174,16 @@ int cli_parse(int argc, char **argv, struct cli_request *request) {
         if (argc >= 3 && !parse_index(argv[2], &request->index)) {
             return usage("route index must be a nonnegative integer");
         }
+    } else if (strcmp(command, "set-target") == 0) {
+        request->command = CLI_SET_TARGET;
+        min_args = max_args = 2; has_target = true;
+        if (argc >= 3) {
+            request->destination = argv[2];
+            if (strcmp(request->destination, "default") != 0 &&
+                !valid_target(request->destination)) {
+                return usage("invalid destination");
+            }
+        }
     } else if (strcmp(command, "list-profiles") == 0) {
         request->command = CLI_LIST_PROFILES;
         min_args = max_args = 1; has_target = true;
@@ -413,6 +423,10 @@ static void on_pw_default(enum default_metadata_key key, const char *value, void
     cli_evaluate(state);
 }
 
+static void on_pw_stream_target(uint32_t stream_id, void *data) {
+    cli_evaluate(data);
+}
+
 static void on_pw_sync(int seq, void *data) {
     struct cli_state *state = data;
     if (state->done || seq != state->sync_seq) return;
@@ -434,6 +448,7 @@ static const struct pipewire_events pipewire_events = {
     .node = on_pw_node,
     .device = on_pw_device,
     .default_ = on_pw_default,
+    .stream_target = on_pw_stream_target,
     .sync = on_pw_sync,
     .error = on_pw_error,
 };
@@ -697,6 +712,52 @@ static void evaluate_node(struct cli_state *state, struct cli_node *entry) {
             }
         }
         return;
+    case CLI_SET_TARGET: {
+        const enum media_class stream_class = node_media_class(entry->node);
+        enum media_class destination_class;
+        if (stream_class == STREAM_OUTPUT_AUDIO) {
+            destination_class = AUDIO_SINK;
+        } else if (stream_class == STREAM_INPUT_AUDIO) {
+            destination_class = AUDIO_SOURCE;
+        } else {
+            finish(state, 3, "target is not a playback or recording stream");
+            return;
+        }
+        if (!pipewire_default_available()) {
+            finish(state, 1, "PipeWire default metadata is unavailable");
+            return;
+        }
+
+        uint32_t destination_id = PW_ID_ANY;
+        if (strcmp(request->destination, "default") != 0) {
+            unsigned matches = 0;
+            for (struct cli_node *candidate = state->nodes; candidate; candidate = candidate->next) {
+                if (candidate->removed || !candidate->props_seen ||
+                    node_media_class(candidate->node) != destination_class ||
+                    !node_matches(candidate, request->destination)) continue;
+                destination_id = node_id(candidate->node);
+                matches++;
+            }
+            if (matches > 1) {
+                finish(state, 3, "ambiguous destination name; use id:N");
+                return;
+            }
+            if (!matches) {
+                finish(state, 3, "destination '%s' not found", request->destination);
+                return;
+            }
+        }
+        if (pipewire_stream_target_matches(node_id(entry->node), destination_id)) {
+            finish(state, 0, NULL);
+        } else if (!state->action_sent) {
+            if (!pipewire_set_stream_target(node_id(entry->node), destination_id)) {
+                finish(state, 1, "failed to set stream destination");
+            } else {
+                state->action_sent = true;
+            }
+        }
+        return;
+    }
     case CLI_LIST_ROUTES:
     case CLI_SET_ROUTE:
         if (!entry->routes_seen && entry->has_device) return;

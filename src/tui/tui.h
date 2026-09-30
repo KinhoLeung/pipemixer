@@ -153,6 +153,7 @@ void tui_bind_quit(union tui_bind_data data);
 
 void tui_bind_set_default(union tui_bind_data data);
 void tui_bind_select_route(union tui_bind_data data);
+void tui_bind_select_target(union tui_bind_data data);
 void tui_bind_select_profile(union tui_bind_data data);
 
 union tui_bind_data {

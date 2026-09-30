@@ -59,6 +59,7 @@ void print_help_and_exit(FILE *stream, int exit_status) {
         "    set-default TARGET\n"
         "    list-routes TARGET\n"
         "    set-route TARGET INDEX\n"
+        "    set-target STREAM DESTINATION|default\n"
         "    list-profiles DEVICE\n"
         "    set-profile DEVICE INDEX\n"
         "\n"

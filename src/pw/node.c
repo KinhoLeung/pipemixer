@@ -623,3 +623,7 @@ const char *node_meter_target(const struct node *node) {
     return node->serial ?: dict_get(&node->props, "node.name");
 }
 
+const struct dict *node_properties(const struct node *node) {
+    return &node->props;
+}
+

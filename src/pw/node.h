@@ -27,6 +27,7 @@ void node_unref(struct node **pnode);
 uint32_t node_id(const struct node *node);
 enum media_class node_media_class(const struct node *node);
 const char *node_meter_target(const struct node *node);
+const struct dict *node_properties(const struct node *node);
 
 #define ALL_CHANNELS ((uint32_t)-1)
 

@@ -12,7 +12,7 @@ arguments=(
         '(-t --timeout)'{-t,--timeout=}'[command timeout in milliseconds]:milliseconds:'
         '(- :)'{-h,--help}'[print this help message and exit]'
         '(- :)'{-V,--version}'[print version information]'
-        '1:command:((list get-volume set-volume get-mute set-mute get-default set-default list-routes set-route list-profiles set-profile))'
+        '1:command:((list get-volume set-volume get-mute set-mute get-default set-default list-routes set-route set-target list-profiles set-profile))'
         '*:argument:'
 )
 

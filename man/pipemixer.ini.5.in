@@ -103,7 +103,12 @@ Set focused source or sink as default.
 .PP
 .B select-route
 .RS 4
-Show route selection menu.
+Show device port selection menu.
+.RE
+.PP
+.B select-target
+.RS 4
+Show the destination menu for a playback or recording stream.
 .RE
 .PP
 .B select-profile
