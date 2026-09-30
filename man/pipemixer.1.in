@@ -5,6 +5,9 @@ pipemixer \- audio mixer for pipewire
 .SH SYNOPSIS
 .B pipemixer
 [\fIOPTIONS\fR]
+.br
+.B pipemixer
+[\fIOPTIONS\fR] \fICOMMAND\fR [\fIARGUMENTS\fR]
 
 .SH DESCRIPTION
 pipemixer is a terminal-based audio mixer for the pipewire audio system.
@@ -23,8 +26,72 @@ Write log output to the specified file descriptor (must be open for writing).
 .B \-C, \-\-color
 Force colored log output.
 .TP
+.B \-j, \-\-json
+Print JSON for query commands.
+.TP
+.B \-t, \-\-timeout \fIMS\fR
+Set the command deadline in milliseconds (default: 5000).
+.TP
 .B \-h, \-\-help
 Display help message and exit.
+
+.SH NONINTERACTIVE COMMANDS
+Options must appear before the command. A target is an exact PipeWire
+.B node.name
+or
+.B device.name,
+.B id:N,
+or, for nodes,
+.B serial:N.
+Use
+.B list
+to discover names and IDs. A channel is a short channel name such as
+.B FL
+or
+.B FR.
+.TP
+.B list [nodes|devices]
+List audio nodes (the default) or audio devices.
+.TP
+.B get-volume TARGET [CHANNEL]
+Print channel volumes in percent. With CHANNEL, print one numeric value.
+.TP
+.B set-volume TARGET PERCENT [CHANNEL]
+Set all channels or one channel to an absolute volume from 0 to 150 percent.
+.TP
+.B get-mute TARGET
+Print on or off.
+.TP
+.B set-mute TARGET on|off|toggle
+Set or toggle mute.
+.TP
+.B get-default sink|source
+Print the name of the current default audio sink or source.
+.TP
+.B set-default TARGET
+Set an audio sink or source as the default.
+.TP
+.B list-routes TARGET
+List the routes of a node with their indices and active status.
+.TP
+.B set-route TARGET INDEX
+Activate a listed route.
+.TP
+.B list-profiles DEVICE
+List the profiles of an audio device with their indices and active status.
+.TP
+.B set-profile DEVICE INDEX
+Activate a listed profile.
+.PP
+Query commands accept
+.B --json.
+Mutation commands produce no output on success and wait for the requested
+state to be reported by PipeWire. CLI commands do not require a config file
+unless one is supplied with
+.B --config.
+.PP
+Exit status: 0 for success, 1 for a PipeWire error or timeout, 2 for invalid
+arguments, and 3 for an unavailable target or state.
 
 .SH CONTROLS
 By default, pipemixer uses the following keybinds:

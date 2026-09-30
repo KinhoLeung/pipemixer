@@ -8,8 +8,12 @@ arguments=(
         '(-L --log-fd)'{-L,--log-fd=}'[write log to this fd]:file descriptor:_file_descriptors'
         '(-v --validate)'{-v,--validate}'[validate configuration file and exit]'
         '(-C --color)'{-C,--color}'[force logging with colors]'
+        '(-j --json)'{-j,--json}'[print query results as JSON]'
+        '(-t --timeout)'{-t,--timeout=}'[command timeout in milliseconds]:milliseconds:'
         '(- :)'{-h,--help}'[print this help message and exit]'
         '(- :)'{-V,--version}'[print version information]'
+        '1:command:((list get-volume set-volume get-mute set-mute get-default set-default list-routes set-route list-profiles set-profile))'
+        '*:argument:'
 )
 
 _arguments "${arguments[@]}"

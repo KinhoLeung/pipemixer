@@ -241,7 +241,7 @@ void node_set_route(const struct node *node, uint32_t route_index) {
     }
 }
 
-void node_set_default(const struct node *node) {
+bool node_set_default(const struct node *node) {
     enum default_metadata_key key;
     switch (node->media_class) {
     case AUDIO_SINK:
@@ -252,13 +252,11 @@ void node_set_default(const struct node *node) {
         break;
     default:
         WARN("node_set_default called on a node that's neither a sink nor a source");
-        return;
+        return false;
     }
 
     const char *node_name = dict_get(&node->props, "node.name");
-    if (node_name) {
-        pipewire_set_default(key, node_name);
-    }
+    return node_name && pipewire_set_default(key, node_name);
 }
 
 static void on_default(enum default_metadata_key key, const char *val, void *data) {

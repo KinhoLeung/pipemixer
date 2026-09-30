@@ -23,12 +23,16 @@ void pipewire_cleanup(void);
 struct node *node_lookup(pw_id_t id);
 struct device *device_lookup(pw_id_t id);
 
-void pipewire_set_default(enum default_metadata_key key, const char *value);
+bool pipewire_set_default(enum default_metadata_key key, const char *value);
+bool pipewire_default_available(void);
+int pipewire_sync(void);
 
 struct pipewire_events {
     void (*node)(struct node *node, void *data);
     void (*device)(struct device *dev, void *data);
     void (*default_)(enum default_metadata_key key, const char *val, void *data);
+    void (*sync)(int seq, void *data);
+    void (*error)(int code, const char *message, void *data);
 };
 
 struct event_hook *pipewire_add_listener(const struct pipewire_events *events, void *data);

@@ -1,6 +1,11 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <stdint.h>
+#include <string.h>
+#include <wctype.h>
+
+#include "xmalloc.h"
 
 #include <ncurses.h>
 #include <spa/utils/string.h>
@@ -87,6 +92,39 @@ bool strneq(const char *a, const char *b, size_t len) {
         return false;
     }
     return strncmp(a, b, len) == 0;
+}
+
+char *json_quote(const char *str) {
+    const size_t len = strlen(str);
+    if (len > (SIZE_MAX - 3) / 6) {
+        abort();
+    }
+
+    char *result = xmalloc(len * 6 + 3);
+    char *out = result;
+    *out++ = '"';
+    static const char hex[] = "0123456789abcdef";
+    for (const unsigned char *p = (const unsigned char *)str; *p; p++) {
+        switch (*p) {
+        case '"': *out++ = '\\'; *out++ = '"'; break;
+        case '\\': *out++ = '\\'; *out++ = '\\'; break;
+        case '\b': *out++ = '\\'; *out++ = 'b'; break;
+        case '\f': *out++ = '\\'; *out++ = 'f'; break;
+        case '\n': *out++ = '\\'; *out++ = 'n'; break;
+        case '\r': *out++ = '\\'; *out++ = 'r'; break;
+        case '\t': *out++ = '\\'; *out++ = 't'; break;
+        default:
+            if (*p < 0x20) {
+                *out++ = '\\'; *out++ = 'u'; *out++ = '0'; *out++ = '0';
+                *out++ = hex[*p >> 4]; *out++ = hex[*p & 15];
+            } else {
+                *out++ = *p;
+            }
+        }
+    }
+    *out++ = '"';
+    *out = '\0';
+    return result;
 }
 
 bool cut_prefix(const char *str, const char *prefix, const char **suffix) {

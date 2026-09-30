@@ -39,6 +39,7 @@ default_config_source = custom_target(
 
 pipemixer_sources = [
   'src/pipemixer.c',
+  'src/cli.c',
   'src/log.c',
   'src/xmalloc.c',
   'src/utils.c',

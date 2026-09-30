@@ -33,7 +33,7 @@ const char *node_meter_target(const struct node *node);
 void node_set_mute(const struct node *node, bool mute);
 void node_change_volume(const struct node *node, bool absolute, float volume, uint32_t channel);
 void node_set_route(const struct node *node, uint32_t route_index);
-void node_set_default(const struct node *node);
+bool node_set_default(const struct node *node);
 
 struct node_events {
     void (*removed)(struct node *node, void *data);

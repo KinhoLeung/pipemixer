@@ -43,6 +43,13 @@ enum pipewire_event_types {
     PIPEWIRE_EVENT_NODE,
     PIPEWIRE_EVENT_DEVICE,
     PIPEWIRE_EVENT_DEFAULT,
+    PIPEWIRE_EVENT_SYNC,
+    PIPEWIRE_EVENT_ERROR,
+};
+
+struct pipewire_error {
+    int code;
+    char *message;
 };
 
 static void pipewire_event_dispatcher(uint64_t id, union event_data data,
@@ -65,6 +72,14 @@ static void pipewire_event_dispatcher(uint64_t id, union event_data data,
         enum default_metadata_key key = data.u;
         struct default_metadata *md = &pw.default_metadata;
         EVENT_DISPATCH(table->default_, key, md->properties[key], callbacks_data);
+        break;
+    }
+    case PIPEWIRE_EVENT_SYNC:
+        EVENT_DISPATCH(table->sync, (int)data.i, callbacks_data);
+        break;
+    case PIPEWIRE_EVENT_ERROR: {
+        const struct pipewire_error *error = data.p;
+        EVENT_DISPATCH(table->error, error->code, error->message, callbacks_data);
         break;
     }
     default:
@@ -141,54 +156,65 @@ static const char *default_metadata_key_str(enum default_metadata_key key) {
     return keys[key];
 }
 
-void pipewire_set_default(enum default_metadata_key key, const char *value) {
-    /* TODO: proper escaping? */
-    char *json;
-    xasprintf(&json, "{ \"name\": \"%s\" }", value);
+bool pipewire_default_available(void) {
+    return pw.default_metadata.pw_metadata != NULL;
+}
 
-    pw_metadata_set_property(pw.default_metadata.pw_metadata, 0,
-                             default_metadata_key_str(key), "Spa:String:JSON", json);
+int pipewire_sync(void) {
+    return pw.core ? pw_core_sync(pw.core, PW_ID_CORE, 0) : -1;
+}
+
+bool pipewire_set_default(enum default_metadata_key key, const char *value) {
+    if (!pipewire_default_available() || !value) {
+        return false;
+    }
+
+    char *quoted = json_quote(value);
+    char *json;
+    xasprintf(&json, "{ \"name\": %s }", quoted);
+    free(quoted);
+
+    const int result = pw_metadata_set_property(pw.default_metadata.pw_metadata, 0,
+                                                 default_metadata_key_str(key),
+                                                 "Spa:String:JSON", json);
     free(json);
+    return result >= 0;
 }
 
 static int on_default_metadata_property(void *data, uint32_t id, const char *key,
                                         const char *type, const char *val) {
     struct default_metadata *md = data;
 
-    INFO("default metadata property id=%u key=%s type=%s val=%s", id, key, type, val);
+    INFO("default metadata property id=%u key=%s type=%s val=%s",
+         id, key ?: "(null)", type ?: "(null)", val ?: "(null)");
 
-    if (!streq(type, "Spa:String:JSON")) {
-        WARN("unexpected metadata property type %s", type);
-        return 0; /* what am I even expected to return here? */
+    if (!key) return 0;
+
+    char *name = NULL;
+    if (val) {
+        if (!streq(type, "Spa:String:JSON")) {
+            WARN("unexpected metadata property type %s", type ?: "(null)");
+            return 0;
+        }
+        name = xmalloc(strlen(val) + 1);
+        if (spa_json_str_object_find(val, strlen(val), "name", name,
+                                     strlen(val) + 1) < 0) {
+            ERROR("could not parse default metadata property JSON");
+            free(name);
+            return 0;
+        }
     }
-
-    const char *name = NULL;
-    int name_len = 0;
-    struct spa_json iter;
-    if (spa_json_begin_object(&iter, val, strlen(val)) < 0) {
-        ERROR("could not parse metdata property json");
-        return 0;
-    } else if ((name_len = spa_json_object_find(&iter, "name", &name)) < 0) {
-        ERROR("did not find \"name\" in metadata property json");
-        return 0;
-    } else if (name[0] != '"' || name[name_len - 1] != '"') {
-        ERROR("value of \"name\" in metadata property is not a string");
-        return 0;
-    }
-
-    /* thank you pipewire for this amazing json api that
-     * returns strings WITH QUOTES FOR WHATEVER REASON??? */
-    name += 1;
-    name_len -= 2;
 
     for (unsigned i = 0; i < DEFAULT_METADATA_KEY_COUNT; i++) {
         if (streq(key, default_metadata_key_str(i))) {
             free(md->properties[i]);
-            xasprintf(&md->properties[i], "%.*s", name_len, name);
+            md->properties[i] = name;
             emit_default(i, NULL);
+            name = NULL;
             break;
         }
     }
+    free(name);
 
     return 0;
 }
@@ -290,12 +316,29 @@ static const struct pw_registry_events registry_events = {
     .global_remove = on_registry_global_remove,
 };
 
+static void on_core_done(void *data, uint32_t id, int seq) {
+    if (id == PW_ID_CORE) {
+        event_emit(pw.emitter, NULL, PIPEWIRE_EVENT_SYNC, NULL, 'i', (int64_t)seq);
+    }
+}
+
+static void free_pipewire_error(union event_data data) {
+    struct pipewire_error *error = data.p;
+    free(error->message);
+    free(error);
+}
+
 static void on_core_error(void *data, uint32_t id, int seq, int res, const char *message) {
     ERROR("core error %d on object %d: %d (%s)", seq, id, res, message);
+    struct pipewire_error *error = xmalloc(sizeof(*error));
+    *error = (struct pipewire_error){ .code = res, .message = xstrdup(message) };
+    event_emit(pw.emitter, NULL, PIPEWIRE_EVENT_ERROR,
+               free_pipewire_error, 'p', error);
 }
 
 static const struct pw_core_events core_events = {
     .version = PW_VERSION_CORE_EVENTS,
+    .done = on_core_done,
     .error = on_core_error,
 };
 

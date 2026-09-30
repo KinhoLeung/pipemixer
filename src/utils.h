@@ -13,3 +13,6 @@ bool strneq(const char *a, const char *b, size_t len);
 /* returns true if str begins with prefix and puts the rest in suffix */
 bool cut_prefix(const char *str, const char *prefix, const char **suffix);
 
+/* Returns a newly allocated JSON string literal, including its quotes. */
+char *json_quote(const char *str);
+
