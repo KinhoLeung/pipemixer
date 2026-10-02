@@ -22,6 +22,7 @@ static void events_fd_handler(void *_, int _, uint32_t _) {
 static void bad_signal_handler(int sig) {
     /* restore terminal state before crashing */
     endwin();
+    tui_disable_button_motion_tracking();
     raise(sig);
 }
 

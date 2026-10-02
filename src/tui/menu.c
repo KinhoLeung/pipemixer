@@ -53,6 +53,11 @@ bool tui_menu_change_focus(struct tui_menu *const menu, int direction) {
     return change;
 }
 
+unsigned tui_menu_first_visible(const struct tui_menu *const menu) {
+    const unsigned visible = menu->h > 2 ? (unsigned)(menu->h - 2) : 0;
+    return visible && menu->selected >= visible ? menu->selected - visible + 1 : 0;
+}
+
 void tui_menu_draw(const struct tui_menu *const menu) {
     TRACE("tui_draw_menu: %dx%d at %dx%d", menu->w, menu->h, menu->x, menu->y);
     WINDOW *win = menu->win;
@@ -83,8 +88,7 @@ void tui_menu_draw(const struct tui_menu *const menu) {
 
     mvwaddnwstr(win, 0, 1, menu->header.data, menu->w - 2);
     const unsigned int visible = menu->h > 2 ? (unsigned int)(menu->h - 2) : 0;
-    const unsigned int first = visible && menu->selected >= visible
-                             ? menu->selected - visible + 1 : 0;
+    const unsigned int first = tui_menu_first_visible(menu);
     for (unsigned int row = 0; row < visible && first + row < menu->n_items; row++) {
         unsigned int i = first + row;
         if (i == menu->selected) {

@@ -41,4 +41,5 @@ void tui_menu_free(struct tui_menu *menu);
 void tui_menu_draw(const struct tui_menu *menu);
 
 bool tui_menu_change_focus(struct tui_menu *menu, int direction);
+unsigned tui_menu_first_visible(const struct tui_menu *menu);
 

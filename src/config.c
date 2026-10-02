@@ -237,6 +237,7 @@ static const struct section_handler section_handlers[] = {
             { "volume-min", percentage_parser, &config.volume_min },
             { "volume-max", percentage_parser, &config.volume_max },
             { "wraparound", bool_parser, &config.wraparound },
+            { "mouse", bool_parser, &config.mouse },
             { "tab-order", tab_order_parser, &config.tabs },
             { "default-tab", tab_parser, &config.default_tab },
             { 0 }

@@ -125,6 +125,7 @@ extern struct tui tui;
 
 bool tui_init(void);
 void tui_cleanup(void);
+void tui_disable_button_motion_tracking(void);
 
 /* binds */
 union tui_bind_data;

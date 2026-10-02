@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "tui/tui.h"
 #include "tui/pad.h"
@@ -31,6 +32,45 @@ enum color_pair {
 };
 
 struct tui tui = {0};
+static bool button_motion_tracking = false;
+
+static bool uses_xterm_mouse_protocol(void) {
+    const char *term = getenv("TERM");
+    return term && (strncmp(term, "xterm", 5) == 0
+                    || strncmp(term, "screen", 6) == 0
+                    || strncmp(term, "tmux", 4) == 0);
+}
+
+void tui_disable_button_motion_tracking(void) {
+    if (!button_motion_tracking) return;
+    button_motion_tracking = false;
+    static const char reset[] = "\033[?1002l";
+    const ssize_t written = write(STDOUT_FILENO, reset, sizeof(reset) - 1);
+    (void)written;
+}
+
+struct node_layout {
+    int usable_width, info_area_width, info_area_start;
+    int volume_area_start, volume_bar_start, volume_bar_width;
+};
+
+static struct node_layout get_node_layout(void) {
+    const int usable_width = tui.term_width - 2;
+    const int two_thirds = usable_width / 3 * 2;
+    const int bar_width_max = MAX(0, two_thirds - 14);
+    const int bar_width = (bar_width_max / 15) * 15;
+    const int volume_area_width = bar_width + 14;
+    const int info_area_width = usable_width - volume_area_width - 1;
+    const int volume_area_start = 1 + info_area_width + 1;
+    return (struct node_layout){
+        .usable_width = usable_width,
+        .info_area_width = info_area_width,
+        .info_area_start = 1,
+        .volume_area_start = volume_area_start,
+        .volume_bar_start = volume_area_start + 12,
+        .volume_bar_width = bar_width,
+    };
+}
 
 static enum tui_tab_type media_class_to_tui_tab(enum media_class class) {
     switch (class) {
@@ -120,16 +160,13 @@ static void tui_tab_item_draw_node(const struct tui_tab_item *const item,
 
     const struct tui_tab_item_node_data *d = &item->as.node;
 
-    const int usable_width = tui.term_width - 2; /* account for box borders */
-    const int two_thirds_usable_width = usable_width / 3 * 2;
-    /* 5 for channel name, 1 space, 3 volume, 1 space, 4 more for decorations = 14 */
-    const int volume_bar_width_max = MAX(0, two_thirds_usable_width - 14);
-    const int volume_bar_width = (volume_bar_width_max / 15) * 15;
-    const int volume_area_width = volume_bar_width + 14;
-    const int info_area_width = usable_width - volume_area_width - 1; /* leave a space */
-    const int info_area_start = 1; /* right after box border */
-    const int volume_area_start = info_area_start + info_area_width + 1;
-    const int volume_bar_start = volume_area_start + 12; /* minus two decorations at the end */
+    const struct node_layout layout = get_node_layout();
+    const int usable_width = layout.usable_width;
+    const int info_area_width = layout.info_area_width;
+    const int info_area_start = layout.info_area_start;
+    const int volume_area_start = layout.volume_area_start;
+    const int volume_bar_start = layout.volume_bar_start;
+    const int volume_bar_width = layout.volume_bar_width;
 
     const bool focused = item->focused;
     const bool muted = d->muted;
@@ -1479,9 +1516,168 @@ static const struct pipewire_events pipewire_events = {
     .device = on_pipewire_device,
 };
 
+static void mouse_scroll_current_tab(int direction) {
+    struct tui_tab *tab = &tui.tabs[tui.tab_index];
+    int bottom = 0;
+    LIST_FOREACH(elem, &tab->items) {
+        const struct tui_tab_item *item = CONTAINER_OF(elem, struct tui_tab_item, link);
+        bottom = MAX(bottom, item->pos + item->height);
+    }
+    const int visible = MAX(0, tui.term_height - 1);
+    const int max_scroll = MAX(0, bottom - visible);
+    tab->scroll_pos = MAX(0, MIN(max_scroll, tab->scroll_pos + direction * 3));
+}
+
+static void mouse_select_tab(int x) {
+    int start = 0;
+    FOR_EACH_TAB(i) {
+        const int end = start + (int)strlen(tui_tab_name(tui.tabs[i].type)) + 3;
+        if (x >= start && x < end) {
+            tui_bind_set_tab_index((union tui_bind_data){ .index = i });
+            return;
+        }
+        start = end;
+    }
+}
+
+static struct tui_tab_item *mouse_item_at(int y) {
+    if (y < 1 || y >= tui.term_height) return NULL;
+    const struct tui_tab *tab = &tui.tabs[tui.tab_index];
+    const int pad_y = tab->scroll_pos + y - 1;
+    LIST_FOREACH(elem, &tab->items) {
+        struct tui_tab_item *item = CONTAINER_OF(elem, struct tui_tab_item, link);
+        if (pad_y >= item->pos && pad_y < item->pos + item->height) return item;
+    }
+    return NULL;
+}
+
+static void mouse_node_click(struct tui_tab_item *item, int x, int line, mmask_t button) {
+    struct tui_tab_item_node_data *d = &item->as.node;
+    const enum media_class media_class = node_media_class(d->node);
+    tui_tab_item_focus(item, true, true);
+
+    if (button & BUTTON2_PRESSED) {
+        node_set_mute(d->node, !d->muted);
+        return;
+    }
+    if (button & BUTTON3_PRESSED) {
+        if (media_class == STREAM_OUTPUT_AUDIO || media_class == STREAM_INPUT_AUDIO) {
+            tui_bind_select_target((union tui_bind_data){0});
+        } else if (media_class == AUDIO_SINK || media_class == AUDIO_SOURCE) {
+            node_set_default(d->node);
+        }
+        return;
+    }
+    if (!(button & BUTTON1_PRESSED)) return;
+
+    if (line >= 2 && line < 2 + (int)d->n_channels) {
+        const unsigned channel = (unsigned)(line - 2);
+        if (d->unlocked_channels && d->focused_channel != channel) {
+            d->focused_channel = channel;
+            tui_tab_item_draw(item, TUI_TAB_ITEM_DRAW_DECORATIONS);
+        }
+        const struct node_layout layout = get_node_layout();
+        if (layout.volume_bar_width > 0 && x >= layout.volume_bar_start
+            && x < layout.volume_bar_start + layout.volume_bar_width) {
+            const float fraction = layout.volume_bar_width == 1 ? 1.0f
+                : (float)(x - layout.volume_bar_start) / (layout.volume_bar_width - 1);
+            const float volume = fmaxf(config.volume_min,
+                                       fminf(config.volume_max, 1.5f * fraction));
+            node_change_volume(d->node, true, volume,
+                               d->unlocked_channels ? channel : ALL_CHANNELS);
+        } else if (x >= layout.volume_area_start + 6
+                   && x < layout.volume_area_start + 9) {
+            node_set_mute(d->node, !d->muted);
+        }
+        return;
+    }
+
+    if (line == 1 && (media_class == STREAM_OUTPUT_AUDIO
+                      || media_class == STREAM_INPUT_AUDIO)) {
+        tui_bind_select_target((union tui_bind_data){0});
+    } else if (line == item->height - 2 && d->n_routes >= 2) {
+        tui_bind_select_route((union tui_bind_data){0});
+    }
+}
+
+static void mouse_device_click(struct tui_tab_item *item, int line, mmask_t button) {
+    tui_tab_item_focus(item, true, true);
+    if ((button & BUTTON3_PRESSED)
+        || ((button & BUTTON1_PRESSED) && line == item->height - 2)) {
+        tui_bind_select_profile((union tui_bind_data){0});
+    }
+}
+
+static void on_mouse_event(const MEVENT *event) {
+    if (event->x < 0 || event->x >= tui.term_width
+        || event->y < 0 || event->y >= tui.term_height) return;
+
+    if (event->bstate & (BUTTON4_PRESSED | BUTTON5_PRESSED)) {
+        const int direction = event->bstate & BUTTON4_PRESSED ? -1 : 1;
+        if (tui.menu_active) {
+            tui_menu_change_focus(tui.menu, direction);
+        } else {
+            mouse_scroll_current_tab(direction);
+        }
+        return;
+    }
+
+    if (tui.menu_active) {
+        if (event->bstate & BUTTON3_PRESSED) {
+            tui_bind_cancel_selection((union tui_bind_data){0});
+            return;
+        }
+        if (!(event->bstate & BUTTON1_PRESSED)) return;
+        const struct tui_menu *menu = tui.menu;
+        const int row = event->y - menu->y - 1;
+        const int visible = MAX(0, menu->h - 2);
+        if (event->x > menu->x && event->x < menu->x + menu->w - 1
+            && row >= 0 && row < visible) {
+            const unsigned index = tui_menu_first_visible(menu) + (unsigned)row;
+            if (index < menu->n_items) {
+                tui.menu->selected = index;
+                tui_bind_confirm_selection((union tui_bind_data){0});
+            }
+        } else {
+            tui_bind_cancel_selection((union tui_bind_data){0});
+            if (event->y == 0) mouse_select_tab(event->x);
+        }
+        return;
+    }
+
+    if (event->y == 0) {
+        if (event->bstate & BUTTON1_PRESSED) mouse_select_tab(event->x);
+        return;
+    }
+    if (!(event->bstate & (BUTTON1_PRESSED | BUTTON2_PRESSED | BUTTON3_PRESSED))) return;
+    struct tui_tab_item *item = mouse_item_at(event->y);
+    if (!item) return;
+    const int line = tui.tabs[tui.tab_index].scroll_pos + event->y - 1 - item->pos;
+    if (item->type == TUI_TAB_ITEM_TYPE_NODE) {
+        mouse_node_click(item, event->x, line, event->bstate);
+    } else {
+        mouse_device_click(item, line, event->bstate);
+    }
+}
+
+static void dispatch_mouse_events(void) {
+    MEVENT event;
+    if (getmouse(&event) != OK) return;
+
+    /* ncurses returns batched events newest first. Drain its bounded queue
+     * before handling them so a buffered release cannot hide an earlier press. */
+    dispatch_mouse_events();
+    on_mouse_event(&event);
+}
+
 static void on_stdin_ready(void *_, int _, uint32_t _) {
     wint_t ch;
     while (errno = 0, wget_wch(stdscr, &ch) != ERR || errno == EINTR) {
+        if (ch == KEY_MOUSE) {
+            dispatch_mouse_events();
+            trigger_update();
+            continue;
+        }
         if (ch == KEY_RESIZE) {
             WARN("KEY_RESIZE %s (%d)", key_name_from_key_code(ch), ch);
         }
@@ -1586,6 +1782,23 @@ bool tui_init(void) {
     nodelay(stdscr, TRUE); /* getch() will fail instead of blocking waiting for input */
     keypad(stdscr, TRUE);
     ESCDELAY = 50 /* ms */;
+    if (config.mouse) {
+        mouseinterval(0);
+        /* Accept releases as well: ncurses can block waiting for another
+         * event after filtering a release, even with nodelay enabled. */
+        const mmask_t enabled = mousemask(BUTTON1_PRESSED | BUTTON1_RELEASED
+                                          | BUTTON2_PRESSED | BUTTON2_RELEASED
+                                          | BUTTON3_PRESSED | BUTTON3_RELEASED
+                                          | BUTTON4_PRESSED | BUTTON4_RELEASED
+                                          | BUTTON5_PRESSED | BUTTON5_RELEASED, NULL);
+        if (enabled && uses_xterm_mouse_protocol()) {
+            /* Some terminals select text under mode 1000, pausing live output.
+             * Mode 1002 keeps press/release reporting and prevents selection. */
+            fputs("\033[?1002h", stdout);
+            fflush(stdout);
+            button_motion_tracking = true;
+        }
+    }
 
     start_color();
     use_default_colors();
@@ -1658,5 +1871,6 @@ void tui_cleanup(void) {
     }
 
     endwin();
+    tui_disable_button_motion_tracking();
 }
 

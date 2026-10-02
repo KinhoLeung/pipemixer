@@ -11,6 +11,14 @@ On a playback or recording stream, press `c` to choose an output or input device
 Choose `Follow default` to let PipeWire use the system default again.
 The device port menu remains on `p`.
 
+Mouse controls are enabled by default. Click a tab to switch views or a row to
+focus it. Click a stream title to choose its device, a device port or card
+profile row to open its menu, the volume bar to set volume, or the volume
+number to toggle mute. Click a menu choice to apply it; click outside to cancel.
+The wheel scrolls lists or menu choices. Right-click a stream to choose its
+device or an output/input device to make it the default. Middle-click a node
+to toggle mute. Set `mouse=false` under `[main]` to disable mouse capture.
+
 ## Building
 ```
 git clone https://github.com/heather7283/pipemixer
