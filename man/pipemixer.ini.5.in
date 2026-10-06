@@ -117,6 +117,71 @@ Show device port selection menu.
 Show the destination menu for a playback or recording stream.
 .RE
 .PP
+.B toggle-routing
+.RS 4
+Open or close the live audio routing matrix.
+.RE
+.PP
+.B manage-audio
+.RS 4
+Open the bus/send creation and managed audio path deletion menu.
+.RE
+.PP
+.B manage-effects
+.RS 4
+Open effect creation or the focused effect's parameter editor.
+.RE
+.PP
+.B manage-scenes
+.RS 4
+Open the scene save, load, delete and startup restoration selection menu.
+.RE
+.PP
+.B manage-routing-rules
+.RS 4
+In the routing matrix, save an automatic rule for the selected output/input
+ports. From the mixer, open the rule state, enable/disable and delete menu.
+In the rule menu, h/l or Left/Right adjusts the focused rule's priority by 10.
+.RE
+.PP
+.B save-routing-batch
+.RS 4
+In the routing matrix, save a glob rule for all compatible channels of the
+selected source and target nodes. The default binding is A.
+.RE
+.PP
+.B diagnostics
+.RS 4
+Open live per-channel peak/RMS/overload, CPU/memory, profiler and anomaly
+monitoring for the focused node or routing source. Default i.
+.RE
+.PP
+.B manage-recording
+.RS 4
+Open bounded audio cache creation, multitrack recording and export controls.
+Completed capture sessions survive TUI exit. Default R.
+.RE
+.PP
+.B manage-automation
+.RS 4
+Open automation, fades and MIDI/OSC management. The default key is o.
+Complex rule definitions and external mappings are stored separately in
+$XDG_CONFIG_HOME/pipemixer/automation.json (or ~/.config/pipemixer/automation.json).
+.RE
+.PP
+.B manage-monitors
+.RS 4
+Open independent monitor creation/selection, normal mix/Solo editing,
+listening source, enable/disable and deletion. Default M.
+.RE
+.PP
+.B monitor-solo, monitor-listen, monitor-clear-solo
+.RS 4
+Toggle the focused source in the selected monitor's Solo list, listen to the
+focused source, or clear all Solo and return to the stored listening choice.
+Defaults S, L, U. Available in the mixer and routing matrix.
+.RE
+.PP
 .B select-profile
 .RS 4
 Show profile selection menu.

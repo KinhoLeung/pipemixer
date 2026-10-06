@@ -1,0 +1,60 @@
+#!/bin/sh
+# Run on the Luckfox board: sh scripts/install-board-startup PATH_TO_BINARY
+set -eu
+binary=${1:?Pass the built pipemixer binary}
+plugin=${2:-$(dirname -- "$binary")/pipemixer-dynamics.so}
+script_directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+for dependency in pipewire wireplumber flock pidof stat cksum cut sed id; do
+    command -v "$dependency" >/dev/null || { echo "Missing dependency: $dependency" >&2; exit 1; }
+done
+[ -f "$binary" ] || exit 1
+[ -f "$plugin" ] || { echo "Missing dynamics plugin: $plugin" >&2; exit 1; }
+for companion in pipemixer-launcher pipemixer-session S98pipemixer pipemixer-automation-session S99pipemixer-automation; do
+    [ -f "$script_directory/$companion" ] || { echo "Missing startup script: $companion" >&2; exit 1; }
+done
+mkdir -p /usr/bin /usr/local/bin /usr/local/libexec /usr/local/lib/pipemixer
+cp "$plugin" /usr/local/lib/pipemixer/pipemixer-dynamics.so.new
+chmod 755 /usr/local/lib/pipemixer/pipemixer-dynamics.so.new
+mv /usr/local/lib/pipemixer/pipemixer-dynamics.so.new /usr/local/lib/pipemixer/pipemixer-dynamics.so
+if [ -f /usr/local/bin/pipemixer ] && [ ! -e /usr/local/bin/pipemixer.before-startup ]; then
+    cp -p /usr/local/bin/pipemixer /usr/local/bin/pipemixer.before-startup
+fi
+cp "$binary" /usr/local/bin/pipemixer.new
+chmod 755 /usr/local/bin/pipemixer.new
+mv /usr/local/bin/pipemixer.new /usr/local/bin/pipemixer
+if [ -e /usr/bin/pipemixer ] && [ ! -e /usr/bin/pipemixer.before-local-install ]; then
+    cp -p /usr/bin/pipemixer /usr/bin/pipemixer.before-local-install
+fi
+cp "$script_directory/pipemixer-launcher" /usr/bin/pipemixer.new
+chmod 755 /usr/bin/pipemixer.new
+mv /usr/bin/pipemixer.new /usr/bin/pipemixer
+cp "$script_directory/pipemixer-session" /usr/local/libexec/pipemixer-session.new
+chmod 755 /usr/local/libexec/pipemixer-session.new
+mv /usr/local/libexec/pipemixer-session.new /usr/local/libexec/pipemixer-session
+cp "$script_directory/S98pipemixer" /etc/init.d/S98pipemixer.new
+chmod 755 /etc/init.d/S98pipemixer.new
+mv /etc/init.d/S98pipemixer.new /etc/init.d/S98pipemixer
+cp "$script_directory/pipemixer-automation-session" /usr/local/libexec/pipemixer-automation-session.new
+chmod 755 /usr/local/libexec/pipemixer-automation-session.new
+mv /usr/local/libexec/pipemixer-automation-session.new /usr/local/libexec/pipemixer-automation-session
+cp "$script_directory/S99pipemixer-automation" /etc/init.d/S99pipemixer-automation.new
+chmod 755 /etc/init.d/S99pipemixer-automation.new
+mv /etc/init.d/S99pipemixer-automation.new /etc/init.d/S99pipemixer-automation
+example="$script_directory/../assets/automation/example.json"
+documentation="$script_directory/../docs/AUTOMATION.md"
+if [ -f "$example" ]; then
+    mkdir -p /usr/local/share/pipemixer/automation
+    cp "$example" /usr/local/share/pipemixer/automation/example.json.new
+    chmod 644 /usr/local/share/pipemixer/automation/example.json.new
+    mv /usr/local/share/pipemixer/automation/example.json.new /usr/local/share/pipemixer/automation/example.json
+fi
+if [ -f "$documentation" ]; then
+    mkdir -p /usr/local/share/doc/pipemixer
+    cp "$documentation" /usr/local/share/doc/pipemixer/AUTOMATION.md.new
+    chmod 644 /usr/local/share/doc/pipemixer/AUTOMATION.md.new
+    mv /usr/local/share/doc/pipemixer/AUTOMATION.md.new /usr/local/share/doc/pipemixer/AUTOMATION.md
+fi
+sync
+/etc/init.d/S98pipemixer start
+/etc/init.d/S99pipemixer-automation start
+echo 'Installed /usr/local/bin/pipemixer and the persistent audio/automation services'

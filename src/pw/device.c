@@ -1,5 +1,6 @@
 #include <spa/pod/builder.h>
 #include <spa/pod/parser.h>
+#include <spa/pod/iter.h>
 #include <spa/param/props.h>
 #include <spa/param/audio/raw-types.h>
 
@@ -18,6 +19,7 @@ struct device {
     struct spa_hook proxy_listener;
 
     uint32_t id;
+    char *serial;
     struct dict props;
 
     VEC(struct param_route) routes;
@@ -34,6 +36,7 @@ struct device {
     bool has_props;
     bool has_routes;
     bool has_profiles;
+    bool profile_supported;
 
     unsigned refcnt;
 };
@@ -133,7 +136,7 @@ void device_set_props(const struct device *dev,
     pw_device_set_param(dev->pw_device, SPA_PARAM_Route, 0, param);
 }
 
-void device_set_route(const struct device *dev, int32_t card_profile_device, int32_t index) {
+int device_set_route(const struct device *dev, int32_t card_profile_device, int32_t index) {
     uint8_t buffer[1024];
     struct spa_pod_builder b;
     spa_pod_builder_init(&b, buffer, sizeof(buffer));
@@ -144,10 +147,10 @@ void device_set_route(const struct device *dev, int32_t card_profile_device, int
                                    SPA_PARAM_ROUTE_index, SPA_POD_Int(index),
                                    SPA_PARAM_ROUTE_save, SPA_POD_Bool(true));
 
-    pw_device_set_param(dev->pw_device, SPA_PARAM_Route, 0, route);
+    return pw_device_set_param(dev->pw_device, SPA_PARAM_Route, 0, route);
 }
 
-void device_set_profile(const struct device *dev, int32_t index) {
+int device_set_profile(const struct device *dev, int32_t index) {
     uint8_t buffer[1024];
     struct spa_pod_builder b;
     spa_pod_builder_init(&b, buffer, sizeof(buffer));
@@ -157,7 +160,7 @@ void device_set_profile(const struct device *dev, int32_t index) {
                                    SPA_PARAM_PROFILE_index, SPA_POD_Int(index),
                                    SPA_PARAM_PROFILE_save, SPA_POD_Bool(true));
 
-    pw_device_set_param(dev->pw_device, SPA_PARAM_Profile, 0, profile);
+    return pw_device_set_param(dev->pw_device, SPA_PARAM_Profile, 0, profile);
 }
 
 static void on_device_param_route(struct device *dev, const struct spa_pod *param) {
@@ -204,6 +207,7 @@ static void on_device_param_enum_route(struct device *dev, const struct spa_pod 
     pw_int_t index;
     pw_id_t direction;
     const char *name, *description;
+    pw_id_t availability = SPA_PARAM_AVAILABILITY_unknown;
 
     uint32_t dev_csize, dev_ctype, dev_nvals;
     const pw_int_t *dev_vals;
@@ -229,6 +233,8 @@ static void on_device_param_enum_route(struct device *dev, const struct spa_pod 
         ERROR("unexpected array member type in pod");
         return;
     }
+    const struct spa_pod_prop *available = spa_pod_find_prop(param, NULL, SPA_PARAM_ROUTE_available);
+    if (available) spa_pod_get_id(&available->value, &availability);
 
     struct param_route *new_route = VEC_APPEND(&dev->staging.routes);
     *new_route = (struct param_route){
@@ -239,6 +245,7 @@ static void on_device_param_enum_route(struct device *dev, const struct spa_pod 
         .n_devices = dev_nvals,
         .devices = xmemduparray(dev_vals, dev_nvals, dev_csize),
         .n_profiles = prof_nvals,
+        .availability = availability,
         .profiles = xmemduparray(prof_vals, prof_nvals, prof_csize),
     };
 
@@ -252,6 +259,7 @@ static void on_device_param_enum_profile(struct device *dev, const struct spa_po
 
     const char *description, *name;
     pw_int_t index;
+    pw_id_t availability = SPA_PARAM_AVAILABILITY_unknown;
 
     const int n =
         spa_pod_parser_get_object(&p,
@@ -264,10 +272,13 @@ static void on_device_param_enum_profile(struct device *dev, const struct spa_po
         return;
     }
 
+    const struct spa_pod_prop *available = spa_pod_find_prop(param, NULL, SPA_PARAM_PROFILE_available);
+    if (available) spa_pod_get_id(&available->value, &availability);
     struct param_profile *new_profile = VEC_APPEND(&dev->staging.profiles);
     *new_profile = (struct param_profile){
         .index = index,
         .description = xstrdup(description),
+        .availability = availability,
         .name = xstrdup(name),
     };
 
@@ -336,10 +347,12 @@ static void on_device_param(void *data, int seq, uint32_t id, uint32_t index,
 static void on_device_info(void *data, const struct pw_device_info *info) {
     struct device *dev = data;
 
-    DEBUG("dev %d info: n_params=%d change=0x%lx", info->id, info->n_params, info->change_mask);
+    DEBUG("dev %d info: n_params=%d change=0x%" PRIx64, info->id, info->n_params, info->change_mask);
 
     if (info->change_mask & PW_DEVICE_CHANGE_MASK_PROPS) {
         const struct spa_dict *props = info->props;
+        const char *serial = spa_dict_lookup(props, PW_KEY_OBJECT_SERIAL);
+        if (!dev->serial && serial) dev->serial = xstrdup(serial);
 
         dict_clear(&dev->props);
         dict_reserve(&dev->props, props->n_items);
@@ -372,6 +385,8 @@ static void on_device_info(void *data, const struct pw_device_info *info) {
                 break;
             }
         }
+        for (unsigned i = 0; i < info->n_params; i++)
+            if (info->params[i].id == SPA_PARAM_EnumProfile && (info->params[i].flags & SPA_PARAM_INFO_READ)) dev->profile_supported = true;
 
         if (changed) {
             /* IN THIS EXACT ORDER! */
@@ -429,11 +444,12 @@ static const struct pw_proxy_events proxy_events = {
     .removed = on_proxy_removed,
 };
 
-struct device *device_create(struct pw_device *pw_device, uint32_t id) {
+struct device *device_create(struct pw_device *pw_device, uint32_t id, const char *serial) {
     struct device *dev = xmalloc(sizeof(*dev));
 
     *dev = (struct device){
         .id = id,
+        .serial = xstrdup(serial),
         .pw_device = pw_device,
         .refcnt = 1,
     };
@@ -450,6 +466,7 @@ static void device_destroy(struct device *device) {
     pw_proxy_destroy(device->pw_proxy);
 
     dict_free(&device->props);
+    free(device->serial);
 
     VEC_FOREACH(&device->routes, i) {
         struct param_route *route = &device->routes.data[i];
@@ -498,4 +515,10 @@ void device_unref(struct device **pdev) {
 uint32_t device_id(const struct device *dev) {
     return dev->id;
 }
-
+const char *device_serial(const struct device *dev) { return dev ? dev->serial : NULL; }
+const struct dict *device_properties(const struct device *dev) { return dev && dev->has_props ? &dev->props : NULL; }
+bool device_profiles_ready(const struct device *dev) { return dev && dev->has_props && (!dev->profile_supported || dev->has_profiles); }
+const struct param_profile *device_get_profiles(const struct device *dev, unsigned *count) {
+    *count = dev && dev->has_profiles ? dev->profiles.size : 0;
+    return *count ? dev->profiles.data : NULL;
+}

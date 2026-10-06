@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Backport the upstream metadata fix using this board's existing SDK build."""
+import os
+import shlex
+import shutil
+import subprocess
+from pathlib import Path
+
+project = Path(__file__).resolve().parent.parent
+sdk = Path(os.environ.get('SDK_ROOT', '/home/kinho/Lyra-sdk'))
+output = Path(os.environ.get('BUILDROOT_OUTPUT', str(sdk / 'buildroot/output/rockchip_rk3506_luckfox')))
+source = output / 'build/pipewire-1.6.8'
+build = source / 'build'
+host = Path(os.environ.get('BUILDROOT_HOST_DIR', str(output / 'host')))
+destination = Path(os.environ.get('PIPEMIXER_METADATA_BUILD_ROOT', str(project / '.cache/pipewire-metadata-fix'))).resolve()
+compiler = host / 'bin/arm-buildroot-linux-gnueabihf-gcc'
+strip = host / 'bin/arm-buildroot-linux-gnueabihf-strip'
+relative = Path('src/modules/module-metadata/metadata.c')
+object_path = 'src/modules/libpipewire-module-metadata.so.p/module-metadata_metadata.c.o'
+module_path = 'src/modules/libpipewire-module-metadata.so'
+
+for required in [source / relative, build / 'build.ninja', compiler, strip]:
+    if not required.is_file():
+        raise SystemExit('Missing built PipeWire 1.6.8 SDK prerequisite: ' + str(required))
+lines = (build / 'build.ninja').read_text().splitlines()
+
+
+def rule(target, variable):
+    for index, line in enumerate(lines):
+        if line.startswith('build ' + target + ': '):
+            inputs = shlex.split(line.split(': ', 1)[1].split(' | ', 1)[0])[1:]
+            for item in lines[index + 1:]:
+                if not item.startswith(' '):
+                    break
+                prefix = ' ' + variable + ' = '
+                if item.startswith(prefix):
+                    return inputs, shlex.split(item[len(prefix):].replace('$$', '$'))
+    raise SystemExit('Missing SDK build rule for ' + target)
+
+
+patched = destination / 'source'
+(patched / relative).parent.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(source / relative, patched / relative)
+subprocess.run(['patch', '--batch', '--forward', '-p1', '-d', str(patched), '-i',
+                str(project / 'assets/patches/pipewire-1.6.8-metadata-unbind.patch')], check=True)
+_, compile_args = rule(object_path, 'ARGS')
+inputs, link_args = rule(module_path, 'LINK_ARGS')
+replacement = destination / 'metadata.o'
+module = destination / 'libpipewire-module-metadata.so'
+subprocess.run([str(compiler), *compile_args, '-c', str(patched / relative), '-o', str(replacement)],
+               cwd=build, check=True)
+inputs = [str(replacement) if item == object_path else item for item in inputs]
+subprocess.run([str(compiler), *inputs, *link_args, '-o', str(module)], cwd=build, check=True)
+subprocess.run([str(strip), '--strip-unneeded', str(module)], check=True)
+print('Built upstream-compatible PipeWire 1.6.8 metadata module: ' + str(module))

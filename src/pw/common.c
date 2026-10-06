@@ -8,6 +8,7 @@
 #include "pw/node.h"
 #include "pw/peak.h"
 #include "pw/device.h"
+#include "pw/graph.h"
 #include "collections/map.h"
 #include "eventloop.h"
 #include "xmalloc.h"
@@ -35,6 +36,7 @@ struct pipewire {
 
     struct pw_core *core;
     struct spa_hook core_listener;
+    uint32_t server_cookie;
 
     struct pw_registry *registry;
     struct spa_hook registry_listener;
@@ -60,6 +62,7 @@ enum pipewire_event_types {
     PIPEWIRE_EVENT_DEVICE,
     PIPEWIRE_EVENT_DEFAULT,
     PIPEWIRE_EVENT_STREAM_TARGET,
+    PIPEWIRE_EVENT_GRAPH,
     PIPEWIRE_EVENT_SYNC,
     PIPEWIRE_EVENT_ERROR,
 };
@@ -97,6 +100,9 @@ static void pipewire_event_dispatcher(uint64_t id, union event_data data,
     case PIPEWIRE_EVENT_SYNC:
         EVENT_DISPATCH(table->sync, (int)data.i, callbacks_data);
         break;
+    case PIPEWIRE_EVENT_GRAPH:
+        EVENT_DISPATCH(table->graph, callbacks_data);
+        break;
     case PIPEWIRE_EVENT_ERROR: {
         const struct pipewire_error *error = data.p;
         EVENT_DISPATCH(table->error, error->code, error->message, callbacks_data);
@@ -124,11 +130,15 @@ static void emit_device(struct device *dev, struct event_hook *hook) {
 }
 
 static void emit_default(enum default_metadata_key key, struct event_hook *hook) {
-    event_emit(pw.emitter, hook, PIPEWIRE_EVENT_DEFAULT, NULL, 'u', key);
+    event_emit(pw.emitter, hook, PIPEWIRE_EVENT_DEFAULT, NULL, 'u', (uint64_t)key);
 }
 
 static void emit_stream_target(uint32_t stream_id) {
-    event_emit(pw.emitter, NULL, PIPEWIRE_EVENT_STREAM_TARGET, NULL, 'u', stream_id);
+    event_emit(pw.emitter, NULL, PIPEWIRE_EVENT_STREAM_TARGET, NULL, 'u', (uint64_t)stream_id);
+}
+
+static void emit_graph(void) {
+    event_emit(pw.emitter, NULL, PIPEWIRE_EVENT_GRAPH, NULL, 'u', (uint64_t)0);
 }
 
 struct event_hook *pipewire_add_listener(const struct pipewire_events *events, void *data) {
@@ -175,6 +185,11 @@ void pipewire_foreach_node(void (*callback)(struct node *node, void *data), void
         callback(node, data);
     }
 }
+void pipewire_foreach_device(void (*callback)(struct device *device, void *data), void *data) {
+    struct device *device;
+    MAP_FOREACH(&pw.devices, &device) callback(device, data);
+}
+uint32_t pipewire_server_cookie(void) { return pw.server_cookie; }
 
 static const char *default_metadata_key_str(enum default_metadata_key key) {
     static const char *const keys[] = {
@@ -193,6 +208,14 @@ bool pipewire_default_available(void) {
 
 int pipewire_sync(void) {
     return pw.core ? pw_core_sync(pw.core, PW_ID_CORE, 0) : -1;
+}
+
+const char *pipewire_get_default(enum default_metadata_key key) {
+    return key < DEFAULT_METADATA_KEY_COUNT ? pw.default_metadata.properties[key] : NULL;
+}
+
+struct pw_context *pipewire_context(void) {
+    return pw.context;
 }
 
 bool pipewire_set_default(enum default_metadata_key key, const char *value) {
@@ -357,11 +380,13 @@ static void on_registry_global(void *data, uint32_t id, uint32_t permissions,
                                const char *type, uint32_t version,
                                const struct spa_dict *props) {
     DEBUG("registry global: id=%d, perms=0o%o, type=%s, ver=%d", id, permissions, type, version);
+    graph_global(id, type, version, props);
 
     if (streq(type, PW_TYPE_INTERFACE_Node)) {
         const char *name = spa_dict_lookup(props, PW_KEY_NODE_NAME);
         const char *suffix;
-        if (streq(spa_dict_lookup(props, PEAK_METER_NODE_PROPERTY), "true")
+        if (streq(spa_dict_lookup(props, "pipemixer.internal"), "true")
+            || streq(spa_dict_lookup(props, PEAK_METER_NODE_PROPERTY), "true")
             || (name && cut_prefix(name, PEAK_METER_NODE_PREFIX, &suffix))) {
             return;
         }
@@ -402,8 +427,10 @@ static void on_registry_global(void *data, uint32_t id, uint32_t permissions,
         }
 
         struct pw_device *pw_device = pw_registry_bind(pw.registry, id, type, PW_VERSION_DEVICE, 0);
-        struct device *device = device_create(pw_device, id);
+        struct device *device = device_create(pw_device, id, spa_dict_lookup(props, PW_KEY_OBJECT_SERIAL));
         map_insert(&pw.devices, id, device);
+        struct node *node;
+        MAP_FOREACH(&pw.nodes, &node) node_bind_device(node, device);
         emit_device(device, NULL);
     } else if (streq(type, PW_TYPE_INTERFACE_Metadata)) {
         if (!streq(spa_dict_lookup(props, "metadata.name"), "default")) {
@@ -425,6 +452,7 @@ static void on_registry_global(void *data, uint32_t id, uint32_t permissions,
 }
 
 static void on_registry_global_remove(void *data, uint32_t id) {
+    graph_global_remove(id);
     struct default_metadata *md = &pw.default_metadata;
     if (md->pw_metadata && md->id == id) {
         spa_hook_remove(&md->listener);
@@ -478,16 +506,22 @@ static void free_pipewire_error(union event_data data) {
 
 static void on_core_error(void *data, uint32_t id, int seq, int res, const char *message) {
     ERROR("core error %d on object %d: %d (%s)", seq, id, res, message);
+    /* A global can vanish before binding, or a failed negotiation can remove
+     * a resource before our queued proxy cleanup reaches the server. */
+    if (res == -ENOENT && (id != PW_ID_CORE || (message && !strncmp(message, "unknown resource ", 17)))) return;
+    if (res == -ESTALE && message && !strncmp(message, "no global ", 10)) return;
     struct pipewire_error *error = xmalloc(sizeof(*error));
     *error = (struct pipewire_error){ .code = res, .message = xstrdup(message) };
     event_emit(pw.emitter, NULL, PIPEWIRE_EVENT_ERROR,
                free_pipewire_error, 'p', error);
 }
 
+static void on_core_info(void *data, const struct pw_core_info *info) { pw.server_cookie = info->cookie; }
 static const struct pw_core_events core_events = {
     .version = PW_VERSION_CORE_EVENTS,
     .done = on_core_done,
     .error = on_core_error,
+    .info = on_core_info,
 };
 
 bool pipewire_init(void) {
@@ -505,6 +539,7 @@ bool pipewire_init(void) {
     pw_core_add_listener(pw.core, &pw.core_listener, &core_events, NULL);
 
     pw.registry = pw_core_get_registry(pw.core, PW_VERSION_REGISTRY, 0);
+    graph_init(pw.core, pw.registry, emit_graph);
     pw_registry_add_listener(pw.registry, &pw.registry_listener, &registry_events, NULL);
 
     pw.emitter = event_emitter_create(pipewire_event_dispatcher);
@@ -513,6 +548,7 @@ bool pipewire_init(void) {
 }
 
 void pipewire_cleanup(void) {
+    graph_cleanup();
     struct stream_target *target;
     MAP_FOREACH(&pw.stream_targets, &target) free_stream_target(target);
     map_free(&pw.stream_targets);
@@ -540,4 +576,3 @@ void pipewire_cleanup(void) {
     }
     pw_deinit();
 }
-

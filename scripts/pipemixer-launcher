@@ -1,0 +1,9 @@
+#!/bin/sh
+# Use the installed board build; retain an explicitly selected runtime.
+if [ -z "${XDG_RUNTIME_DIR:-}" ]; then
+    runtime_candidate=/run/user/$(id -u)
+    if [ -S "$runtime_candidate/pipewire-0" ]; then
+        export XDG_RUNTIME_DIR="$runtime_candidate"
+    fi
+fi
+exec /usr/local/bin/pipemixer "$@"

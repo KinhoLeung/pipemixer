@@ -1,11 +1,13 @@
 #include <search.h>
 #include <assert.h>
 #include <math.h>
+#include <errno.h>
 
 #include <spa/pod/builder.h>
 #include <spa/pod/parser.h>
 #include <spa/param/props.h>
 #include <spa/param/audio/raw-types.h>
+#include <spa/param/audio/raw-utils.h>
 
 #include "pw/node.h"
 #include "pw/device.h"
@@ -30,6 +32,8 @@ struct node {
     struct dict props;
 
     struct param_props param_props;
+    struct spa_audio_info_raw format;
+    bool format_subscribed;
 
     bool is_default;
     struct event_hook *default_hook;
@@ -233,13 +237,40 @@ void node_change_volume(const struct node *node, bool absolute, float volume, ui
     node_set_props(node, props);
 }
 
-void node_set_route(const struct node *node, uint32_t route_index) {
+const struct param_props *node_get_params(const struct node *node) {
+    return node && node->has_param_props ? &node->param_props : NULL;
+}
+
+int node_set_volumes(const struct node *node, const float volumes[], unsigned count) {
+    if (!node || !node->has_param_props || count != node->param_props.n_channels
+        || count > SPA_AUDIO_MAX_CHANNELS) return -EINVAL;
+    float gains[SPA_AUDIO_MAX_CHANNELS];
+    for (unsigned i = 0; i < count; i++) {
+        if (!isfinite(volumes[i]) || volumes[i] < 0 || volumes[i] > 10) return -ERANGE;
+        gains[i] = volumes[i] * volumes[i] * volumes[i];
+    }
+    uint8_t buffer[4096];
+    struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
+    const struct spa_pod *props = spa_pod_builder_add_object(&b, SPA_TYPE_OBJECT_Props,
+        SPA_PARAM_Props, SPA_PROP_channelVolumes,
+        SPA_POD_Array(sizeof(float), SPA_TYPE_Float, count, gains));
+    node_set_props(node, props);
+    return 0;
+}
+
+int node_set_route(const struct node *node, uint32_t route_index) {
     if (!node->device) {
         WARN("Tried to set route on a node that does not have a device");
+        return -ENODEV;
     } else {
-        device_set_route(node->device, node->card_profile_device, route_index);
+        return device_set_route(node->device, node->card_profile_device, route_index);
     }
 }
+const struct param_route *node_get_routes(const struct node *node, unsigned *count) {
+    *count = node && node->has_routes ? node->n_routes : 0;
+    return *count ? node->routes : NULL;
+}
+bool node_routes_ready(const struct node *node) { return node && node->has_routes; }
 
 bool node_set_default(const struct node *node) {
     enum default_metadata_key key;
@@ -350,6 +381,7 @@ static void on_device_routes(struct device *dev,
             .name = xstrdup(route->name),
             .description = xstrdup(route->description),
             .active = route->active,
+            .availability = route->availability,
         };
 
         if (route->active) {
@@ -405,12 +437,17 @@ static const struct device_events device_events = {
     .routes = on_device_routes,
     .profiles = on_device_profiles,
 };
+void node_bind_device(struct node *node, struct device *device) {
+    if (node->device || node->device_id != device_id(device)) return;
+    node->device = device_ref(device);
+    node->device_hook = device_add_listener(device, &device_events, node);
+}
 
 void on_node_info(void *data, const struct pw_node_info *info) {
     struct node *node = data;
 
-    DEBUG("node %d info: state=%d n_params=%d change=0x%lx",
-          info->id, info->state, info->n_params, info->change_mask);
+    DEBUG("node %d info: state=%d n_params=%d change=0x%llx",
+          info->id, info->state, info->n_params, (unsigned long long)info->change_mask);
 
     if (info->change_mask & PW_NODE_CHANGE_MASK_PROPS) {
         const bool first_props = !node->has_props;
@@ -457,19 +494,41 @@ void on_node_info(void *data, const struct pw_node_info *info) {
                 WARN("got device.id=%d on node %d but no device with this id was found",
                      node->device_id, node->id);
             } else {
-                node->device = device_ref(dev);
-                node->device_hook = device_add_listener(node->device, &device_events, node);
+                node_bind_device(node, dev);
             }
         }
 
         emit_props(node, NULL);
         node->has_props = true;
     }
+    if (!node->format_subscribed && (info->change_mask & PW_NODE_CHANGE_MASK_PARAMS)
+        && (node->media_class == STREAM_OUTPUT_AUDIO || node->media_class == STREAM_INPUT_AUDIO)) {
+        for (unsigned i = 0; i < info->n_params; i++) {
+            if (info->params[i].id == SPA_PARAM_Format && (info->params[i].flags & SPA_PARAM_INFO_READ)) {
+                pw_node_subscribe_params(node->pw_node, (uint32_t[]){SPA_PARAM_Props, SPA_PARAM_Format}, 2);
+                node->format_subscribed = true; break;
+            }
+        }
+    }
 }
 
 void on_node_param(void *data, int seq, uint32_t id, uint32_t index,
                    uint32_t next, const struct spa_pod *param) {
     struct node *node = data;
+    if (id == SPA_PARAM_Format) {
+        node->format = (struct spa_audio_info_raw){0};
+        uint32_t type, subtype;
+        if (param && spa_format_parse(param, &type, &subtype) >= 0
+            && type == SPA_MEDIA_TYPE_audio && subtype == SPA_MEDIA_SUBTYPE_raw
+            && spa_format_audio_raw_parse(param, &node->format) >= 0
+            && node->format.channels && !(node->format.flags & SPA_AUDIO_FLAG_UNPOSITIONED)) {
+            /* Props may precede Format during adapter negotiation. Refresh
+             * them now that the actual channel positions are available. */
+            pw_node_enum_params(node->pw_node, 0, SPA_PARAM_Props, 0, UINT32_MAX, NULL);
+        }
+        return;
+    }
+    if (id != SPA_PARAM_Props || !param) return;
 
     struct spa_pod_parser p;
     spa_pod_parser_pod(&p, param);
@@ -496,7 +555,16 @@ void on_node_param(void *data, int seq, uint32_t id, uint32_t index,
     } else if (vol_ctype != SPA_TYPE_Float || map_ctype != SPA_TYPE_Id) {
         ERROR("unexpected array member type in pod");
         return;
-    } else if (map_nvals != vol_nvals) {
+    }
+    /* Native application streams can expose volumes with an empty channelMap.
+     * Their negotiated Format supplies the positions; no remembered stream
+     * state is needed to make fresh applications controllable. */
+    if (!map_nvals && node->format.channels && !(node->format.flags & SPA_AUDIO_FLAG_UNPOSITIONED)
+        && (!vol_nvals || vol_nvals == node->format.channels)) {
+        map_nvals = node->format.channels;
+        map_vals = node->format.position;
+    }
+    if (vol_nvals && map_nvals != vol_nvals) {
         ERROR("channelMap size != channelVolumes size (wtf)");
         return;
     }
@@ -504,25 +572,27 @@ void on_node_param(void *data, int seq, uint32_t id, uint32_t index,
     DEBUG("node %d Props: mute=%d n_channels=%u", node->id, mute, map_nvals);
 
     struct param_props *props = &node->param_props;
+    bool channels_changed = props->n_channels != map_nvals || !node->has_param_props;
 
-    if (props->n_channels != map_nvals || !node->has_param_props) {
+    if (channels_changed) {
         props->channel_names =
             xreallocarray(props->channel_names, map_nvals, sizeof(props->channel_names[0]));
         props->channel_volumes =
             xreallocarray(props->channel_volumes, map_nvals, sizeof(props->channel_volumes[0]));
         props->n_channels = map_nvals;
-
-        emit_channels(node, NULL);
     }
 
     for (unsigned i = 0; i < map_nvals; i++) {
         const enum spa_audio_channel chan = map_vals[i];
-        const float volume = vol_vals[i];
+        const float volume = vol_nvals ? vol_vals[i] : 1.0f;
 
-        props->channel_names[i] = spa_type_audio_channel_to_short_name(chan);
+        const char *name = spa_type_audio_channel_to_short_name(chan);
+        if (!channels_changed && !streq(props->channel_names[i], name)) channels_changed = true;
+        props->channel_names[i] = name;
         props->channel_volumes[i] = cbrtf(volume);
     }
 
+    if (channels_changed) emit_channels(node, NULL);
     emit_volume(node, NULL);
 
     if (mute != props->mute || !node->has_param_props) {
@@ -626,4 +696,3 @@ const char *node_meter_target(const struct node *node) {
 const struct dict *node_properties(const struct node *node) {
     return &node->props;
 }
-

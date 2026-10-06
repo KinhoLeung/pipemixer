@@ -147,8 +147,12 @@ void events_dispatch(void) {
     eventfd_read(g.efd, &eventfd_value);
     g.efd_triggered = false;
 
-    struct event *event;
-    while ((event = queue_pop(&g.queue))) {
+    struct event *queued;
+    while ((queued = queue_pop(&g.queue))) {
+        /* Callbacks can enqueue enough events to grow or wrap the ring.
+         * Keep this event outside that storage until its after callback runs. */
+        const struct event current = *queued;
+        const struct event *event = &current;
         struct event_emitter *emitter = event->emitter;
 
         if (!event->hook) {
@@ -276,4 +280,3 @@ void event_emit(struct event_emitter *emitter, struct event_hook *hook,
 
     event_emit_internal(emitter, hook, id, after, data);
 }
-

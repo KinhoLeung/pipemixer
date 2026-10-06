@@ -1,0 +1,45 @@
+#!/bin/sh
+# Install with pipemixer-session and the binary on the Luckfox SysV image.
+SESSION=/usr/local/libexec/pipemixer-session
+PIDFILE=/run/pipemixer-session.pid
+umask 077
+exec 8>/run/pipemixer-init.lock
+flock -x 8 || exit 1
+
+running() {
+    [ -f "$PIDFILE" ] || return 1
+    read -r session_pid <"$PIDFILE"
+    case "$session_pid" in ''|*[!0-9]*) return 1;; esac
+    kill -0 "$session_pid" 2>/dev/null || return 1
+    tr '\000' '\n' <"/proc/$session_pid/cmdline" 2>/dev/null | grep -Fxq "$SESSION"
+}
+
+case "$1" in
+    start)
+        if running; then echo 'PipeMixer audio session is already running'; exit 0; fi
+        [ -x "$SESSION" ] && [ -x /usr/local/bin/pipemixer ] || exit 1
+        nohup "$SESSION" </dev/null >>/tmp/pipemixer-session.log 2>&1 8>&- &
+        echo "$!" >"$PIDFILE"
+        echo 'Started PipeMixer audio session'
+        ;;
+    stop)
+        if running; then
+            kill "$session_pid"
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
+                running || break
+                sleep 1
+            done
+            if running; then echo 'PipeMixer audio session is still stopping' >&2; exit 1; fi
+        fi
+        rm -f "$PIDFILE"
+        echo 'Stopped PipeMixer audio session'
+        ;;
+    restart|reload)
+        flock -u 8
+        "$0" stop && "$0" start
+        ;;
+    status)
+        if running; then echo "PipeMixer audio session is running (pid $session_pid)"; else echo 'PipeMixer audio session is stopped'; exit 3; fi
+        ;;
+    *) echo "Usage: $0 {start|stop|restart|status}" >&2; exit 2;;
+esac

@@ -34,6 +34,7 @@ struct tui {
     WINDOW *pad_win;
 
     bool menu_active;
+    bool routing_active;
     struct tui_menu *menu;
 
     int tabs_count, tab_index;
@@ -156,6 +157,20 @@ void tui_bind_set_default(union tui_bind_data data);
 void tui_bind_select_route(union tui_bind_data data);
 void tui_bind_select_target(union tui_bind_data data);
 void tui_bind_select_profile(union tui_bind_data data);
+void tui_bind_toggle_routing(union tui_bind_data data);
+void tui_bind_manage_audio(union tui_bind_data data);
+void tui_bind_manage_effects(union tui_bind_data data);
+void tui_bind_manage_scenes(union tui_bind_data data);
+void tui_bind_manage_routing_rules(union tui_bind_data data);
+void tui_bind_save_routing_batch(union tui_bind_data data);
+void tui_bind_manage_monitors(union tui_bind_data data);
+void tui_bind_diagnostics(union tui_bind_data data);
+void tui_bind_manage_recording(union tui_bind_data data);
+void tui_bind_manage_automation(union tui_bind_data data);
+void tui_notice(const char *message);
+void tui_bind_monitor_solo(union tui_bind_data data);
+void tui_bind_monitor_listen(union tui_bind_data data);
+void tui_bind_monitor_clear_solo(union tui_bind_data data);
 
 union tui_bind_data {
     enum tui_direction direction;
@@ -170,4 +185,3 @@ struct tui_bind {
     union tui_bind_data data;
     tui_bind_func_t func;
 };
-

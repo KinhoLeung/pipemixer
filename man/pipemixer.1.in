@@ -50,8 +50,70 @@ to discover names and IDs. A channel is a short channel name such as
 or
 .B FR.
 .TP
-.B list [nodes|devices]
-List audio nodes (the default) or audio devices.
+.B list [nodes|devices|ports|links|graph|buses|sends|effects]
+List audio nodes (the default), audio devices, audio ports, actual audio links,
+or the complete audio graph. With --json, graph returns an object containing
+nodes, ports, and links arrays. Monitor ports and filter nodes are included;
+MIDI/video ports and internal peak-meter streams are excluded.
+The buses, sends and effects lists show one input node per managed path.
+.TP
+.B diagnostics [MILLISECONDS]
+Sample professional monitoring for 100..60000 ms (default 1000). Report system
+and process CPU, audio-process CPU relative to one core, RSS, available RAM,
+PipeWire node state, actual quantum/rate, wait/processing time, DSP load, xrun
+counts and recent errors. Unavailable profiler measurements are explicit.
+.TP
+.B meter TARGET [MILLISECONDS]
+Measure per-channel sample peak, RMS, peak hold, clipped samples (absolute value
+at least 1) and invalid samples. Duration uses the same bounds as diagnostics.
+These commands extend the default timeout to measurement duration plus 5000 ms.
+Meters do not calculate LUFS, intersample true peak or frequency spectra.
+.TP
+.B start-history NAME SECONDS NODE...
+Start a detached bounded audio cache: 1..8 unique sources, 1..120 seconds,
+64 MiB per-session memory budget including capture queues, 64 MiB available-RAM
+admission reserve. Names follow the managed-name convention. Source IDs/serials
+resolve to stable names. Capture uses stereo 48 kHz float PCM and a common
+monotonic frame timeline with 100 ms guard. Missing sources fill silence and
+reconnect by name; independent devices do not share a hardware word clock.
+.TP
+.B list-history
+List active caches in this config-directory scope, with recording state and
+resource counters. Internal capture streams are excluded from ordinary graphs.
+.TP
+.B history-status NAME
+Report cache fill, CPU/RSS, tracks, missing sources, queue drops, gaps, recording
+state, output directory, elapsed frames/bytes, free disk space and last error.
+.TP
+.B export-history NAME NEW_DIRECTORY [SECONDS]
+Export recent audio as one stereo float WAV per track and session.json metadata.
+SECONDS defaults to the full cache; only available history is exported. Stop
+continuous recording first; exporting from an actively recording cache is rejected
+to avoid delaying its file writer. Each
+track has the same frame range. The parent must exist; the destination must be
+new and existing files are never replaced. Default operation timeout: 30000 ms.
+.TP
+.B record-history NAME NEW_DIRECTORY [PREROLL_SECONDS]
+Start continuous multitrack recording from an existing cache. Optional preroll
+is 0..the configured cache duration (default zero). Produces per-source float
+WAVs in 60-second parts and atomic session.json metadata. Headers and metadata
+are checkpointed once per second. The file writer runs outside audio callbacks.
+.TP
+.B stop-recording NAME
+Finalize files while keeping the cache running. Repeated stops succeed.
+.TP
+.B stop-history NAME
+Finalize an active recording and release its cache. Sessions survive TUI exit
+but are not restored after reboot. SIGINT/SIGTERM also finalize active WAVs.
+.PP
+Recording reserves at least 16 MiB disk space; shortage stops recording while
+keeping the cache. Set PIPEMIXER_RECORD_RESERVE_MB=16..1024 and
+PIPEMIXER_RECORD_SEGMENT_SECONDS=1..3600 before creating the cache to change
+these limits. One stereo track writes 384000 bytes/s. TUI output defaults to
+$XDG_STATE_HOME/pipemixer/recordings or ~/.local/state/pipemixer/recordings;
+on small boards choose mounted storage. /tmp may be a RAM filesystem.
+SIGKILL/power loss may lose the latest checkpoint interval. Metadata reports
+frame ranges, sources, gaps, capture drops and segment details.
 .TP
 .B get-volume TARGET [CHANNEL]
 Print channel volumes in percent. With CHANNEL, print one numeric value.
@@ -74,6 +136,47 @@ Set an audio sink or source as the default.
 .B list-routes TARGET
 List the routes of a node with their indices and active status.
 .TP
+.B create-monitor NAME DESTINATION_NODE [SOURCE_NODE...]
+Save an independent stereo monitor. The supervised routing-daemon creates its
+audio path and connects the normal mix to the chosen destination. Names contain
+1-32 letters, digits, hyphens or underscores; node names must be stable names.
+Definitions support up to 32 monitors and 32 sources each, use atomic files
+with mode 0600, and reload after audio-server restart or reboot.
+.TP
+.B set-monitor-sources NAME NODE...|off
+Replace the normal monitor mix, or empty it. Solo and listening choice remain.
+.TP
+.B set-monitor-source NAME NODE|mix
+Listen to one source or the normal mix. Active Solo takes precedence; clearing
+Solo returns to the stored listening choice.
+.TP
+.B solo-monitor NAME NODE on|off|toggle
+Add or remove a Solo source. Multiple Solo sources mix together on this monitor;
+source volume/mute and main output/recording connections are retained.
+.TP
+.B clear-monitor-solo NAME
+Clear all Solo and return to the previous listening source or normal mix.
+.TP
+.B enable-monitor NAME on|off
+Enable or disable managed monitor routes without changing the sources.
+.TP
+.B delete-monitor NAME
+Delete the persistent definition and its own monitor path.
+.TP
+.B check-monitors
+Validate persistent monitor JSON without connecting to PipeWire. Monitor edits
+also work offline. Use the board audio service to apply definitions.
+.TP
+.B list-monitors
+Query live monitor state. JSON includes normal/active sources, Solo, listening
+source, mode, connection counts and engine status. During switching, old or
+incorrectly owned feeds prevent a connected report. Missing selected sources
+stay silent. Foreign configurations or unmanaged monitor input links report
+conflict and suspend the managed output. Closing the TUI keeps monitoring active.
+The path is pipemixer.monitor.NAME.input/.output; use regular volume/mute commands
+on its output for an independent listening level. Scenes capture path, gains
+and link ownership; persistent monitor policy supplies the current mix/Solo.
+.TP
 .B set-route TARGET INDEX
 Activate a listed route.
 .TP
@@ -86,6 +189,217 @@ List the profiles of an audio device with their indices and active status.
 .TP
 .B set-profile DEVICE INDEX
 Activate a listed profile.
+.TP
+.B connect OUTPUT_PORT INPUT_PORT
+Connect two audio ports, using exact node.name:port.name values or id:N.
+The first port must be an output and the second an input. Existing connections
+are left in place. New connections that would form a feedback loop are rejected.
+.TP
+.B disconnect OUTPUT_PORT INPUT_PORT
+Remove all links between two audio ports. An already disconnected pair succeeds.
+.TP
+.B create-bus NAME
+Create a stereo virtual sink and source named pipemixer.bus.NAME.input and
+pipemixer.bus.NAME.output. Applications can play into the sink and record the
+mix from the source.
+.TP
+.B delete-bus NAME
+Remove a managed bus. Removing an already absent bus succeeds.
+.TP
+.B create-send NAME SOURCE_NODE DESTINATION_NODE
+Copy audio from a node with output ports to a node with input ports, without
+changing its original path. The send has independent volume/mute on
+pipemixer.send.NAME.output. Creation waits for its actual links. Fixed targets
+do not fall back to another device. Feedback loops are rejected.
+.TP
+.B delete-send NAME
+Remove a managed send. Removing an already absent send succeeds.
+.TP
+.B create-effect NAME eq|voice|empty|@CONFIG_FILE
+Create a stereo filter chain with a virtual sink/source pair named
+pipemixer.effect.NAME.input and pipemixer.effect.NAME.output. eq provides a
+three-band equalizer; voice provides a high-pass filter, noise gate and
+presence EQ. Custom files supply a filter.graph object (maximum 1 MiB).
+empty creates a pass-through chain with no processors.
+Other stream properties in the file are ignored. Plugins must be installed.
+.TP
+.B delete-effect NAME
+Remove a managed effect. Removing an already absent effect succeeds.
+.TP
+.B effect-params NAME
+List DSP parameter names, current values and ranges. JSON also includes the
+default and writable flag. Frequencies use Hz, EQ gains dB, Q is dimensionless,
+noise-gate thresholds linear amplitudes, and time parameters seconds.
+.TP
+.B set-effect-param NAME PARAMETER VALUE
+Apply a finite value within the listed range without recreating the chain.
+.TP
+.B bypass-effect NAME on|off
+Switch between processed and original audio. Custom graphs need wet:Mult and
+dry:Mult controls with the same semantics as the built-in presets.
+.TP
+.B effect-chain NAME
+List processor IDs, types, order and individual bypass states.
+.TP
+.B add-effect-stage NAME TYPE [POSITION]
+Insert a processor, by default at the end. Positions start at 1; the limit is
+16 processors. Types: lowshelf, peaking, highshelf, highpass, lowpass, gain,
+gate, compressor, limiter. Compressor and limiter require pipemixer-dynamics.so.
+.TP
+.B remove-effect-stage NAME STAGE
+Remove the processor with that ID and its parameters.
+.TP
+.B move-effect-stage NAME STAGE POSITION
+Move a processor to the specified position. Structure edits briefly rebuild
+the chain and restore its current state, connections and dependent Sends.
+The default structure-edit deadline is 30 seconds.
+.TP
+.B bypass-effect-stage NAME STAGE on|off
+Bypass one processor. After converting a fixed preset to an editable chain,
+bypass and parameter changes do not replace the audio nodes.
+Compressor controls use dB, milliseconds and a dimensionless ratio; limiter
+Ceiling dB limits digital samples at that processor's output, without lookahead
+or intersample true-peak detection. Stereo detectors are independent.
+.TP
+.B save-scene NAME
+Atomically save the audio graph, managed path definitions, DSP parameters,
+channel volumes, mute, stream destinations and defaults using stable names.
+Version 2 also saves hardware device/profile names and per-node hardware routes.
+.TP
+.B load-scene NAME
+Restore a scene, recreating missing managed paths and reusing matching ones.
+External nodes must be present. Extra links between saved nodes are removed;
+unlisted managed paths are retained. The default timeout is 30 seconds.
+Runtime failure removes newly created paths; existing state may need reloading.
+.TP
+.B list-scenes
+List saved scene names, optionally as JSON. Does not require PipeWire.
+.TP
+.B check-scene NAME
+Validate scene format, dependencies and feedback without applying it.
+Does not require PipeWire.
+.TP
+.B delete-scene NAME
+Delete a scene file. An absent scene succeeds. Does not alter running audio.
+Deleting the selected startup scene disables startup restoration.
+.TP
+.B set-startup-scene NAME|off
+Validate and select a saved scene for startup restoration. The special value
+off disables restoration. Selection is atomic and does not require PipeWire.
+.TP
+.B get-startup-scene
+Print the startup scene name, or off when disabled. Accepts JSON output and
+does not require PipeWire.
+.TP
+.B restore-startup
+Restore the selected startup scene. Disabled restoration succeeds without
+PipeWire. Absent devices/application streams and dependent sends are skipped
+and reported; independent paths are restored. Other conflicts still fail.
+The default timeout is 30 seconds. Saved scene files are not modified.
+.PP
+Scenes are stored under $XDG_CONFIG_HOME/pipemixer/scenes, falling back to
+$HOME/.config/pipemixer/scenes. Scene names use the managed name rules.
+Custom effect graphs are embedded. Version 2 restores hardware profiles, waits
+for their nodes, selects hardware routes, then restores parameters and links.
+Version 1 remains readable without hardware mode changes. Startup restoration
+skips absent/unavailable hardware and dependent paths; late supported hardware
+is restored by the routing engine. Unknown profile/route names report blocked
+in recovery-status. Temporary unavailability waits for capability changes.
+New snapshots retain automatic link ownership. Restored tagged connections
+can still be removed by their rule engine; older untagged snapshots restore
+manual connections.
+Startup selection is stored in the sibling startup-scene file. Restoration
+runs when invoked; integrate it after PipeWire and the session manager start.
+The supplied Luckfox SysV installer provides a persistent root audio service
+at /etc/init.d/S98pipemixer. Devices appearing after startup can reconnect
+through routing rules and selective scene replay. Successful load-scene or
+restore-startup activates an audio-session snapshot. The routing engine
+replays channel gains, mute, targets, defaults, dependent sends and manual
+links for new object generations, preserving live changes on existing nodes.
+Current rule/monitor policy owns tagged links. Initialization has bounded
+retries; persistent conflicts wait for an explicit scene reload.
+.TP
+.B recovery-status
+Show the active recovery scene and per-node waiting/restoring/restored/blocked
+states, plus hardware profile, route and stream-target progress. Accepts JSON. Restored means this generation has completed replay;
+subsequent live adjustments, including manual hardware choices, are preserved.
+.TP
+.B clear-recovery
+Disable audio-session scene replay without altering audio, startup selection
+or routing/monitor policy. Does not require PipeWire. Engine restarts retain
+the private runtime ledger; loading a scene activates a fresh snapshot.
+.TP
+.B create-route-rule NAME OUTPUT_PORT INPUT_PORT [OPTIONS]
+Save an enabled rule using node.name:port.name endpoints. Endpoints can be
+absent. Session IDs are rejected. Existing names cannot be overwritten.
+Matching defaults to exact, with a separate rule for each stereo channel.
+Use --match glob for quoted shell patterns (*, ?, brackets, backslash escapes).
+Matching ports connect only to the same audio.channel; unknown channels require
+a single port on each side. No implicit mono/stereo conversion is performed.
+Limits are 256 matches per side, 1024 pairs per rule and 8192 pairs per rule set.
+Use --priority N (-1000000..1000000) and --exclusive-group NAME to choose one
+rule per source node. Higher priority wins; ties use ascending rule names.
+Candidates must cover all matching source channels. Ungrouped rules retain
+fan-out; manual connections and other rule sets retain their ownership.
+Repeat --fallback INPUT_PORT for up to eight ordered backup targets using the
+same match mode. Each source selects the first viable candidate and switches
+its channels together. Missing, blocked or failed targets allow the next
+candidate. A better candidate must remain viable for --switch-delay MS
+(0..60000, default 1000) before failback. Negotiation failures have a five-second
+cooldown. Switching removes owned old links before creating replacements.
+.TP
+.B set-route-priority NAME N [GROUP|off]
+Edit priority and optionally the exclusive group. Omission keeps the group;
+off clears it. Works offline and retains other settings.
+.TP
+.B set-route-fallbacks NAME INPUT...|off [--switch-delay MS]
+Replace the ordered backup list, or clear it with off. A delay-only edit
+retains the list. Duplicate selectors, including the primary, are rejected.
+Works offline and retains other settings.
+.TP
+.B enable-route-rule NAME on|off
+Enable or disable a saved rule. The running engine reloads changes within
+one second. Disabled rules remove only their own tagged connections.
+.TP
+.B delete-route-rule NAME
+Delete a saved rule. Missing rules succeed. The engine removes its tagged
+links when it reloads. Existing manual or other rule-set links are retained.
+.TP
+.B check-route-rules
+Validate all routing rule files without applying them. Works without PipeWire.
+.TP
+.B list-route-rules
+Query current connection states and whether the engine is running. JSON
+returns an object containing engine_running and a rules array. Each rule has
+its name, enabled flag, endpoints, state and reason. States are waiting,
+connecting, connected, partial, suppressed, disabled, ambiguous, blocked
+(feedback), or error. JSON includes matched/selected/connected pair counts,
+priority, exclusive group, suppressed pairs, fallback list, delay, using_fallback
+and active_input. The last is null when no target is selected or sources use
+different targets; list links shows individual endpoints.
+.TP
+.B routing-daemon
+Run the automatic routing engine in the foreground until interrupted or
+PipeWire disconnects. One engine is allowed per config directory. The board
+audio supervisor runs and restarts it automatically after scene restoration.
+Stopping it retains existing connections.
+.PP
+Rules are versioned JSON under $XDG_CONFIG_HOME/pipemixer/rules, falling back
+to $HOME/.config/pipemixer/rules. Files use mode 0600 and atomic replacement.
+Version 1 exact rules remain supported. Advanced settings use version 2.
+Creation, enabling, deletion and validation work without PipeWire. Failed
+reloads retain the last valid rules. Missing endpoints wait for their exact
+names to reappear, and then reconnect regardless of new object IDs. Ambiguous
+names or feedback loops prevent creation. The engine repairs disconnected
+enabled pairs and changes only port connections. It waits during scene loading,
+then resumes the global rules shared by scenes in the same config directory.
+The board engine log is /tmp/pipemixer-routing.log.
+.PP
+Managed names contain 1-48 ASCII letters, digits, hyphens or underscores.
+Detached audio workers keep paths alive after the TUI/CLI exits, until deletion
+or PipeWire shutdown. Errors are logged to
+$XDG_RUNTIME_DIR/pipemixer-KIND-NAME.log. Buses and effects do not automatically
+connect to physical devices. Sends and effects need a running session manager.
 .PP
 Query commands accept
 .B --json.
@@ -143,6 +457,73 @@ Show profile selection menu.
 .B D
 Set focused source or sink as default.
 .TP
+.B r
+Open or close the live audio routing matrix. Use arrows or hjkl to select
+output/input ports, then Enter or Space to toggle their connection. A mouse
+click on a matrix cell also toggles it. Escape returns to the mixer.
+.TP
+.B v, z, Z, f, /
+In the matrix, cycle flat/node/type grouping with v; fold output/input groups
+with z/Z. Enter/Space on a header folds it. Cycle type filters with f; / edits
+case-insensitive search, Enter applies, Escape restores it, Ctrl-U clears it.
+These controls change the display while connections keep running.
+.TP
+.B x, X, n, N, c, d, u
+Mark output/input ports or groups with x/X, or all channels of their node with
+n/N. c connects matching selected channels; d disconnects them; u clears marks.
+Known channels pair by label. The complete plan is checked for feedback before
+starting. Connection errors or Escape cancellation roll back only new links;
+pre-existing links remain. Disconnect cancellation can leave partial results.
+Automatic rules may reconnect links. Changing the search/type filter clears
+selection; missing/replaced ports lose marks. Shift-click headers marks them.
+.TP
+.B M, S, L, U
+M opens monitor creation/selection, normal mix/Solo editing, listening source,
+enable/disable and deletion. In the matrix, creation uses the selected source
+and preselects the destination. S toggles Solo for the focused source on the
+selected monitor; L listens to that source; U clears all Solo. Clearing Solo
+restores the previous listening choice or normal mix. Enter toggles source
+membership, g/G jumps to first/last menu item and Escape closes the menu.
+.TP
+.B i
+Open diagnostics for the focused node or matrix source. Enter resets meter
+counters and recent events; Escape closes. Server xrun totals are retained.
+.TP
+.B R
+Manage audio history and multitrack recording. Toggle source membership with
+Enter/Space, then start a 10/30-second cache. Export recent/all cached audio,
+start/stop continuous recording or stop the cache. Displays CPU, memory, disk
+space, source availability and drops. Completed sessions survive closing TUI.
+.TP
+.B b
+Create a stereo bus, create an independent send from the focused audio node,
+or delete a managed audio path.
+.TP
+.B e
+Create or edit effects. On a focused effect, open its ordered processor list.
+Use j/k to select, Enter to edit parameters, a to add, d to remove with
+confirmation, K/J to reorder, Space to bypass one processor and B for the whole
+chain. On the parameter page h/l or Left/Right adjust, Enter resets and Esc
+returns to the chain. Custom graphs retain their flat parameter editor.
+.TP
+.B s
+Save the current setup as a new scene, load/delete a saved scene, select its
+startup restoration or disable restoration. The header shows the selection.
+New scenes use the first available sceneN name. Move with j/k and confirm
+with Enter.
+.TP
+.B a
+In the routing matrix, save the selected pair as an automatic routing rule
+using the first free routeN name. From the mixer, open the rule menu to query
+live states, pair counts, priority, group and fallback status; enable/disable
+or delete rules with j/k and Enter. Use h/l or Left/Right to adjust priority
+by 10. Group and fallback edits use the CLI.
+.TP
+.B A
+In the routing matrix, save a batch rule for all compatible channels of the
+selected source and target nodes. Literal node names are escaped before
+appending a port wildcard. New matching channels join automatically.
+.TP
 .B Enter
 Confirm selection.
 .TP
@@ -151,6 +532,75 @@ Cancel selection or quit pipemixer if not in menu.
 .TP
 .B q
 Quit the application.
+
+.SH AUTOMATION AND EXTERNAL CONTROL
+Press
+.B o
+for the automation menu. Select a node first to edit its volume fade, or an
+effect node to choose a continuous parameter. Use h/l to adjust the target,
+duration and curve; select Run fade to execute. The menu also enables rules,
+runs their actions, cancels fades and displays MIDI/OSC status.
+.PP
+.B fade-volume TARGET PERCENT MS [linear|smooth]
+and
+.B fade-effect-param NAME PARAMETER VALUE MS [linear|smooth]
+start detached fades. Durations are 20..3600000 ms. Volume fades preserve channel
+balance and interpolate actual gain; parameter fades interpolate continuous
+numeric controls. Manual changes or disappearance/replacement of the target stop
+the fade. CLI/TUI manual edits drain the worker's earlier writes before setting
+the manual value. Updates share a maximum of approximately 50 writes/second;
+one fade normally updates every 20 ms, eight concurrent fades every 160 ms.
+.PP
+.B cancel-fade [TARGET [PARAMETER]]
+cancels running fades and preserves their current values.
+.B automation-status
+prints live job/rule status; --json includes connection state and errors.
+.PP
+.B import-automation FILE
+validates and atomically saves version 1 pipemixer.automation JSON in
+$XDG_CONFIG_HOME/pipemixer/automation.json, or ~/.config/pipemixer/automation.json.
+.B check-automation [FILE]
+validates a file or the installed definitions.
+.B enable-automation NAME on|off
+persists a rule's enabled state.
+.B trigger-automation NAME
+runs its actions manually, bypassing conditions while respecting enable,
+priority and cooldown.
+.PP
+.B start-automation
+starts the engine and saves its supervisor preference as on.
+.B stop-automation
+stops it and saves off.
+.B automation-daemon
+is the foreground engine. The board S99pipemixer-automation service restarts
+enabled engines after failures and waits for startup scene restoration/routing.
+Definitions and preferences survive restart; fade progress and counters reset.
+.PP
+Conditions include all/any/not, presence, mute, volume, effect parameters, RMS
+level, links, defaults and elapsed time. Rules provide hold/release, hysteresis,
+cooldown, priorities and sequential actions; independent sequences run together.
+Actions include fades, parameter/mute updates, waits, scenes, route-rule enable
+and monitoring source/Solo changes. Periodic triggers use monotonic time.
+.PP
+OSC UDP is disabled without an osc configuration; the default configured bind is
+127.0.0.1. Direct controls require direct:true. Methods are /pipemixer/volume,
+/pipemixer/mute, /pipemixer/parameter, /pipemixer/scene and /pipemixer/rule.
+Configured paths can map normalized input to rule actions. Replies use
+/pipemixer/reply with string address, integer result and string error.
+Immediate bundles are supported; future timetags and wildcard addresses are not.
+.PP
+MIDI input uses the configured RawMIDI character device and retries after
+hotplug. Mapping types are cc, note and program, channels 1..16 and numbers
+0..127. Running status, interleaved realtime bytes and velocity-zero note-off
+are supported; SysEx is skipped. MIDI 2.0 and Sequencer routing are not included.
+.PP
+Limits: 32 rules, 256 condition nodes, 8 nesting levels, 8 actions per sequence,
+16 pending sequences, 32 fades, 256 KiB configuration, and 200 OSC packets/sec.
+OSC packets are limited to 4096 bytes and 16 messages. Invalid reloads retain the
+last valid definitions and expose the error in status.
+.PP
+See docs/AUTOMATION.md and assets/automation/example.json for the complete schema,
+message arguments and examples.
 
 .SH MOUSE
 Mouse input is enabled by default and can be disabled with

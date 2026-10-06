@@ -1,0 +1,25 @@
+#!/bin/sh
+# Optional board compatibility update; use only after candidate board testing.
+set -eu
+replacement=${1:?Pass the tested metadata module built by build-pipewire-metadata-fix}
+module=/usr/lib/pipewire-0.3/libpipewire-module-metadata.so
+backup=$module.before-pipemixer
+original=8b8f20e88f473110453adf3f96dc50a43495ac0052429e0fd10343743aecd1aa
+current=$(sha256sum "$module" | cut -d ' ' -f 1)
+candidate=$(sha256sum "$replacement" | cut -d ' ' -f 1)
+if [ "$current" = "$candidate" ]; then
+    echo 'Tested metadata module is already installed'
+    exit 0
+fi
+[ "$current" = "$original" ] || { echo 'This installer only supports the tested Luckfox PipeWire 1.6.8 module' >&2; exit 1; }
+if [ -f "$backup" ]; then
+    [ "$(sha256sum "$backup" | cut -d ' ' -f 1)" = "$original" ] || exit 1
+else
+    cp -p "$module" "$backup"
+fi
+cp "$replacement" "$module.new"
+chmod 755 "$module.new"
+mv "$module.new" "$module"
+sync
+/etc/init.d/S98pipemixer restart
+echo 'Installed upstream metadata unbind fix; original module preserved beside it'

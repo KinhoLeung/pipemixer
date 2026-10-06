@@ -1,5 +1,7 @@
 #include <unistd.h>
 #include <getopt.h>
+#include <locale.h>
+#include <stdlib.h>
 
 #include <ncurses.h>
 #include <spa/utils/string.h>
@@ -26,9 +28,9 @@ static void bad_signal_handler(int sig) {
     raise(sig);
 }
 
-static void exit_signal_handler(int sig) {
+static void exit_signal_handler(void *data, int sig) {
     INFO("caught signal %d, stopping main loop", sig);
-    pw_main_loop_quit(main_loop);
+    tui_bind_quit((union tui_bind_data){0});
 }
 
 void print_help_and_exit(FILE *stream, int exit_status) {
@@ -51,9 +53,16 @@ void print_help_and_exit(FILE *stream, int exit_status) {
         "    -h, --help       print this help message and exit\n"
         "\n"
         "commands (TARGET is an exact name, id:N, or node serial:N):\n"
-        "    list [nodes|devices]\n"
+        "    list [nodes|devices|ports|links|graph|buses|sends|effects]\n"
         "    get-volume TARGET [CHANNEL]\n"
         "    set-volume TARGET PERCENT [CHANNEL]\n"
+        "    fade-volume TARGET PERCENT MS [linear|smooth]\n"
+        "    fade-effect-param NAME PARAM VALUE MS [linear|smooth]\n"
+        "    cancel-fade [TARGET [PARAMETER]]\n"
+        "    start-automation | stop-automation | automation-status\n"
+        "    automation-daemon\n"
+        "    import-automation FILE | check-automation [FILE]\n"
+        "    enable-automation NAME on|off | trigger-automation NAME\n"
         "    get-mute TARGET\n"
         "    set-mute TARGET on|off|toggle\n"
         "    get-default sink|source\n"
@@ -63,6 +72,58 @@ void print_help_and_exit(FILE *stream, int exit_status) {
         "    set-target STREAM DESTINATION|default\n"
         "    list-profiles DEVICE\n"
         "    set-profile DEVICE INDEX\n"
+        "    connect OUTPUT_PORT INPUT_PORT\n"
+        "    disconnect OUTPUT_PORT INPUT_PORT\n"
+        "    create-bus NAME\n"
+        "    create-monitor NAME DESTINATION_NODE [SOURCE_NODE...]\n"
+        "    delete-monitor NAME\n"
+        "    enable-monitor NAME on|off\n"
+        "    set-monitor-sources NAME NODE...|off\n"
+        "    set-monitor-source NAME NODE|mix\n"
+        "    solo-monitor NAME NODE on|off|toggle\n"
+        "    clear-monitor-solo NAME\n"
+        "    list-monitors\n"
+        "    check-monitors\n"
+        "    delete-bus NAME\n"
+        "    create-send NAME SOURCE_NODE DESTINATION_NODE\n"
+        "    delete-send NAME\n"
+        "    create-effect NAME eq|voice|empty|@CONFIG_FILE\n"
+        "    delete-effect NAME\n"
+        "    effect-params NAME\n"
+        "    set-effect-param NAME PARAMETER VALUE\n"
+        "    bypass-effect NAME on|off\n"
+        "    effect-chain NAME\n"
+        "    add-effect-stage NAME TYPE [POSITION]\n"
+        "    remove-effect-stage NAME STAGE\n"
+        "    move-effect-stage NAME STAGE POSITION\n"
+        "    bypass-effect-stage NAME STAGE on|off\n"
+        "    save-scene NAME\n"
+        "    load-scene NAME\n"
+        "    list-scenes\n"
+        "    check-scene NAME\n"
+        "    delete-scene NAME\n"
+        "    set-startup-scene NAME|off\n"
+        "    get-startup-scene\n"
+        "    restore-startup\n"
+        "    recovery-status\n"
+        "    clear-recovery\n"
+        "    diagnostics [MILLISECONDS]\n"
+        "    meter TARGET [MILLISECONDS]\n"
+        "    start-history NAME SECONDS NODE...\n"
+        "    list-history | history-status NAME | stop-history NAME\n"
+        "    export-history NAME NEW_DIRECTORY [SECONDS]\n"
+        "    record-history NAME NEW_DIRECTORY [PREROLL_SECONDS]\n"
+        "    stop-recording NAME\n"
+        "    create-route-rule NAME OUTPUT_PORT INPUT_PORT [OPTIONS]\n"
+        "        --match exact|glob --priority N --exclusive-group NAME\n"
+        "        --fallback INPUT_PORT (repeatable) --switch-delay MS\n"
+        "    set-route-priority NAME N [GROUP|off]\n"
+        "    set-route-fallbacks NAME INPUT_PORT...|off [--switch-delay MS]\n"
+        "    delete-route-rule NAME\n"
+        "    enable-route-rule NAME on|off\n"
+        "    list-route-rules\n"
+        "    check-route-rules\n"
+        "    routing-daemon\n"
         "\n"
         "exit codes: 0 success, 1 PipeWire/timeout error, 2 usage error, 3 target unavailable\n";
 
@@ -97,6 +158,7 @@ int main(int argc, char **argv) {
     bool log_force_colors = false;
     struct cli_request cli_request = { .timeout_ms = 5000 };
     bool cli_options = false;
+    bool timeout_set = false;
 
     /* for easily attaching gdb */
     uint32_t startup_sleep;
@@ -148,6 +210,7 @@ int main(int argc, char **argv) {
             cli_options = true;
             break;
         case 't':
+            timeout_set = true;
             if (!spa_atou32(optarg, &cli_request.timeout_ms, 10)
                 || cli_request.timeout_ms < 1 || cli_request.timeout_ms > 600000) {
                 fprintf(stderr, "pipemixer: timeout must be 1..600000 ms\n");
@@ -181,10 +244,23 @@ int main(int argc, char **argv) {
     setlocale(LC_ALL, "");
 
     const bool cli_mode = optind < argc;
+    if (!cli_mode && MB_CUR_MAX == 1 && !getenv("LC_ALL") && !getenv("LC_CTYPE")) {
+        /* Minimal board images may only ship their local UTF-8 locale. Keep
+         * numeric formatting and explicit locale overrides unchanged. */
+        const char *locales[] = {"C.UTF-8", "C.utf8", "en_US.UTF-8", "zh_CN.utf8"};
+        for (unsigned i = 0; i < sizeof(locales) / sizeof(locales[0]); i++)
+            if (setlocale(LC_CTYPE, locales[i])) break;
+    }
     if (cli_mode || cli_options) {
         setlocale(LC_NUMERIC, "C");
         int parse_status = cli_parse(argc - optind, argv + optind, &cli_request);
         if (parse_status) return parse_status;
+        if (!timeout_set && (cli_request.command == CLI_DIAGNOSTICS || cli_request.command == CLI_METER))
+            cli_request.timeout_ms = cli_request.index + 5000;
+        if (!timeout_set && (cli_request.command == CLI_LOAD_SCENE || cli_request.command == CLI_RESTORE_STARTUP
+            || (cli_request.command == CLI_CAPTURE && (!strcmp(cli_request.kind, "export-history") || !strcmp(cli_request.kind, "record-history") || !strcmp(cli_request.kind, "stop-recording") || !strcmp(cli_request.kind, "stop-history")))
+            || (cli_request.command >= CLI_ADD_EFFECT_STAGE && cli_request.command <= CLI_BYPASS_EFFECT_STAGE)))
+            cli_request.timeout_ms = 30000;
     }
 
     bool config_valid = (cli_mode && !config_path && !validate_config)
@@ -193,6 +269,11 @@ int main(int argc, char **argv) {
         return !config_valid;
     }
     if (cli_mode && !config_valid) return 1;
+
+    if (cli_mode) {
+        int offline_status = cli_offline(&cli_request);
+        if (offline_status >= 0) return offline_status;
+    }
 
     pw_init(NULL, NULL);
 
@@ -234,10 +315,7 @@ int main(int argc, char **argv) {
         SIGTERM, SIGINT,
     };
     for (unsigned i = 0; i < SIZEOF_ARRAY(exit_signals); i++) {
-        sigaction(exit_signals[i], &(struct sigaction){
-            .sa_handler = exit_signal_handler,
-            .sa_flags = SA_RESTART,
-        }, NULL);
+        pw_loop_add_signal(event_loop,exit_signals[i],exit_signal_handler,NULL);
     }
 
     tui_init();
@@ -254,4 +332,3 @@ cleanup:
     if (cli_mode) return retcode;
     exit_curses(retcode);
 }
-

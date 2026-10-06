@@ -1,0 +1,44 @@
+{
+  "format": "pipemixer.automation",
+  "version": 1,
+  "osc": { "bind": "127.0.0.1", "port": 9000, "direct": true },
+  "rules": [
+    {
+      "name": "voice_duck",
+      "enabled": false,
+      "priority": 100,
+      "on_start": true,
+      "hold_ms": 150,
+      "release_ms": 500,
+      "cooldown_ms": 300,
+      "when": {
+        "all": [
+          { "type": "present", "target": "pipemixer.bus.voice.output", "value": true },
+          { "type": "level", "target": "pipemixer.bus.voice.output", "above": -35, "hysteresis": 4 }
+        ]
+      },
+      "actions": [
+        { "type": "fade-volume", "target": "pipemixer.bus.music.output", "value": 50, "duration_ms": 200, "curve": "smooth" }
+      ],
+      "otherwise": [
+        { "type": "fade-volume", "target": "pipemixer.bus.music.output", "value": 100, "duration_ms": 700, "curve": "smooth" }
+      ]
+    },
+    {
+      "name": "osc_music_fader",
+      "enabled": false,
+      "trigger": { "osc": "/controller/music" },
+      "actions": [
+        { "type": "fade-volume", "target": "pipemixer.bus.music.output", "value": "input", "min": 0, "max": 100, "duration_ms": 100 }
+      ]
+    },
+    {
+      "name": "midi_music_fader",
+      "enabled": false,
+      "trigger": { "midi": { "type": "cc", "channel": 1, "number": 7 } },
+      "actions": [
+        { "type": "fade-volume", "target": "pipemixer.bus.music.output", "value": "input", "min": 0, "max": 100, "duration_ms": 100 }
+      ]
+    }
+  ]
+}

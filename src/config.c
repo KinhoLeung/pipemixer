@@ -358,6 +358,32 @@ static bool parse_bind(struct parser_context ctx) {
         ADD_BIND(keycode, tui_bind_select_target, nothing, NOTHING);
     } else if (streq(ctx.key, "select-profile")) {
         ADD_BIND(keycode, tui_bind_select_profile, nothing, NOTHING);
+    } else if (streq(ctx.key, "toggle-routing")) {
+        ADD_BIND(keycode, tui_bind_toggle_routing, nothing, NOTHING);
+    } else if (streq(ctx.key, "manage-audio")) {
+        ADD_BIND(keycode, tui_bind_manage_audio, nothing, NOTHING);
+    } else if (streq(ctx.key, "manage-effects")) {
+        ADD_BIND(keycode, tui_bind_manage_effects, nothing, NOTHING);
+    } else if (streq(ctx.key, "manage-scenes")) {
+        ADD_BIND(keycode, tui_bind_manage_scenes, nothing, NOTHING);
+    } else if (streq(ctx.key, "manage-routing-rules")) {
+        ADD_BIND(keycode, tui_bind_manage_routing_rules, nothing, NOTHING);
+    } else if (streq(ctx.key, "save-routing-batch")) {
+        ADD_BIND(keycode, tui_bind_save_routing_batch, nothing, NOTHING);
+    } else if (streq(ctx.key, "diagnostics")) {
+        ADD_BIND(keycode, tui_bind_diagnostics, nothing, NOTHING);
+    } else if (streq(ctx.key, "manage-automation")) {
+        ADD_BIND(keycode, tui_bind_manage_automation, nothing, NOTHING);
+    } else if (streq(ctx.key, "manage-recording")) {
+        ADD_BIND(keycode, tui_bind_manage_recording, nothing, NOTHING);
+    } else if (streq(ctx.key, "manage-monitors")) {
+        ADD_BIND(keycode, tui_bind_manage_monitors, nothing, NOTHING);
+    } else if (streq(ctx.key, "monitor-solo")) {
+        ADD_BIND(keycode, tui_bind_monitor_solo, nothing, NOTHING);
+    } else if (streq(ctx.key, "monitor-listen")) {
+        ADD_BIND(keycode, tui_bind_monitor_listen, nothing, NOTHING);
+    } else if (streq(ctx.key, "monitor-clear-solo")) {
+        ADD_BIND(keycode, tui_bind_monitor_clear_solo, nothing, NOTHING);
     } else if (streq(ctx.key, "confirm-selection")) {
         ADD_BIND(keycode, tui_bind_confirm_selection, nothing, NOTHING);
     } else if (streq(ctx.key, "cancel-selection")) {
@@ -434,4 +460,3 @@ bool load_config(const char *config_path) {
         };
     }
 }
-

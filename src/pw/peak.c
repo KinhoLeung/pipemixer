@@ -19,6 +19,13 @@ struct peak_meter {
     uint32_t positions[SPA_AUDIO_MAX_CHANNELS];
     float pending[SPA_AUDIO_MAX_CHANNELS];
     float displayed[SPA_AUDIO_MAX_CHANNELS];
+    unsigned rate;
+    uint64_t frames, window_frames;
+    unsigned stale;
+    double sum[SPA_AUDIO_MAX_CHANNELS], total_sum[SPA_AUDIO_MAX_CHANNELS];
+    float rms[SPA_AUDIO_MAX_CHANNELS], hold[SPA_AUDIO_MAX_CHANNELS], maximum[SPA_AUDIO_MAX_CHANNELS];
+    unsigned hold_ticks[SPA_AUDIO_MAX_CHANNELS];
+    uint64_t clipped[SPA_AUDIO_MAX_CHANNELS], invalid[SPA_AUDIO_MAX_CHANNELS];
 };
 
 static void on_format_changed(void *data, uint32_t id, const struct spa_pod *param) {
@@ -48,6 +55,7 @@ static void on_format_changed(void *data, uint32_t id, const struct spa_pod *par
 
     meter->failed = false;
     meter->n_channels = format.channels;
+    meter->rate = format.rate;
     meter->positioned = !(format.flags & SPA_AUDIO_FLAG_UNPOSITIONED);
     memcpy(meter->positions, format.position,
            meter->n_channels * sizeof(meter->positions[0]));
@@ -72,8 +80,14 @@ static void on_process(void *data) {
 
                 /* F32 is interleaved; ignore an incomplete frame at the end. */
                 for (size_t i = 0; i + meter->n_channels <= samples; i += meter->n_channels) {
+                    meter->frames++; meter->window_frames++;
                     for (unsigned channel = 0; channel < meter->n_channels; channel++) {
                         const float value = fabsf(pcm[i + channel]);
+                        if (!isfinite(value)) { meter->invalid[channel]++; continue; }
+                        if (value >= 1) meter->clipped[channel]++;
+                        meter->sum[channel] += (double)value * value;
+                        meter->total_sum[channel] += (double)value * value;
+                        meter->maximum[channel] = fmaxf(meter->maximum[channel], value);
                         if (isfinite(value) && value > meter->pending[channel]) {
                             meter->pending[channel] = value;
                         }
@@ -122,6 +136,7 @@ struct peak_meter *peak_meter_create(const char *target, bool capture_sink, bool
         "node.dont-fallback", "true",
         PW_KEY_STREAM_MONITOR, "true",
         PEAK_METER_NODE_PROPERTY, "true",
+        "state.restore-props", "false", "state.restore-target", "false",
         NULL);
     free(name);
     if (!props) {
@@ -174,6 +189,7 @@ void peak_meter_destroy(struct peak_meter *meter) {
 bool peak_meter_step(struct peak_meter *meter) {
     bool changed = meter->dirty;
     meter->dirty = false;
+    meter->stale = meter->window_frames ? 0 : meter->stale + 1;
 
     for (unsigned i = 0; i < meter->n_channels; i++) {
         /* About 20 dB/s of falloff at a 50 ms display interval. */
@@ -183,10 +199,34 @@ bool peak_meter_step(struct peak_meter *meter) {
         }
         changed |= level != meter->displayed[i];
         meter->displayed[i] = level;
+        meter->rms[i] = meter->window_frames ? sqrt(meter->sum[i] / meter->window_frames) : 0;
+        if (meter->pending[i] >= meter->hold[i]) { meter->hold[i] = meter->pending[i]; meter->hold_ticks[i] = 40; }
+        else if (meter->hold_ticks[i]) meter->hold_ticks[i]--;
+        else meter->hold[i] *= .89f;
+        meter->sum[i] = 0;
         meter->pending[i] = 0;
     }
 
+    meter->window_frames = 0;
     return changed;
+}
+
+void peak_meter_snapshot(const struct peak_meter *meter, struct meter_snapshot *s, bool cumulative) {
+    *s = (struct meter_snapshot){0}; if (!meter) return;
+    s->channels = meter->n_channels; s->rate = meter->rate; s->frames = meter->frames;
+    s->failed = meter->failed; s->active = meter->frames && meter->stale < 20;
+    memcpy(s->positions, meter->positions, sizeof(s->positions));
+    for (unsigned i = 0; i < s->channels; i++) s->channel[i] = (struct meter_channel){
+        .peak = cumulative ? meter->maximum[i] : meter->displayed[i],
+        .rms = cumulative ? (meter->frames ? sqrt(meter->total_sum[i] / meter->frames) : 0) : meter->rms[i],
+        .hold = meter->hold[i], .clipped = meter->clipped[i], .invalid = meter->invalid[i]};
+}
+void peak_meter_reset(struct peak_meter *meter) {
+    if (!meter) return;
+    meter->frames = meter->window_frames = 0;
+    memset(meter->sum, 0, sizeof(meter->sum)); memset(meter->total_sum, 0, sizeof(meter->total_sum));
+    memset(meter->maximum, 0, sizeof(meter->maximum)); memset(meter->hold, 0, sizeof(meter->hold));
+    memset(meter->clipped, 0, sizeof(meter->clipped)); memset(meter->invalid, 0, sizeof(meter->invalid));
 }
 
 bool peak_meter_failed(const struct peak_meter *meter) {

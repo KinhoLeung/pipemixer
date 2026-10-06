@@ -12,9 +12,8 @@ arguments=(
         '(-t --timeout)'{-t,--timeout=}'[command timeout in milliseconds]:milliseconds:'
         '(- :)'{-h,--help}'[print this help message and exit]'
         '(- :)'{-V,--version}'[print version information]'
-        '1:command:((list get-volume set-volume get-mute set-mute get-default set-default list-routes set-route set-target list-profiles set-profile))'
+        '1:command:((list get-volume set-volume get-mute set-mute get-default set-default list-routes set-route set-target list-profiles set-profile connect disconnect create-bus delete-bus create-send delete-send create-effect delete-effect effect-params set-effect-param bypass-effect effect-chain add-effect-stage remove-effect-stage move-effect-stage bypass-effect-stage save-scene load-scene list-scenes check-scene delete-scene set-startup-scene get-startup-scene restore-startup recovery-status clear-recovery create-route-rule delete-route-rule enable-route-rule set-route-priority set-route-fallbacks list-route-rules check-route-rules routing-daemon create-monitor delete-monitor enable-monitor set-monitor-sources set-monitor-source solo-monitor clear-monitor-solo list-monitors check-monitors diagnostics meter start-history list-history history-status export-history record-history stop-recording stop-history fade-volume fade-effect-param cancel-fade start-automation stop-automation automation-status automation-daemon import-automation check-automation enable-automation trigger-automation))'
         '*:argument:'
 )
 
 _arguments "${arguments[@]}"
-

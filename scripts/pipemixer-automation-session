@@ -1,0 +1,71 @@
+#!/bin/sh
+# Independent control supervisor; the audio session keeps its own lifecycle.
+umask 077
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/root/.config}"
+PIPEMIXER_BINARY="${PIPEMIXER_BINARY:-/usr/local/bin/pipemixer}"
+preference="$XDG_CONFIG_HOME/pipemixer/automation-enabled"
+configuration="$XDG_CONFIG_HOME/pipemixer/automation.json"
+mkdir -p "$XDG_RUNTIME_DIR"
+# Distinct config scopes can be exercised without taking over the live service.
+scope=$(printf '%s' "$XDG_CONFIG_HOME" | cksum | cut -d ' ' -f 1)
+exec 9>"$XDG_RUNTIME_DIR/pipemixer-automation-session-$scope.lock"
+flock -n 9 || exit 0
+worker_pid=
+child_pid=
+
+stop_worker() {
+    if [ -n "$worker_pid" ] && [ -r "/proc/$worker_pid/cmdline" ]; then
+        command=$(tr '\000' ' ' <"/proc/$worker_pid/cmdline")
+        case "$command" in
+            *' automation-daemon '*|*' __automation-worker '*) kill "$worker_pid" 2>/dev/null;;
+        esac
+    fi
+    if [ -n "$child_pid" ]; then wait "$child_pid" 2>/dev/null; fi
+    worker_pid=
+    child_pid=
+}
+shutdown() {
+    trap - INT TERM EXIT
+    # A CLI starter can create a worker between two supervisor polls.
+    status=$("$PIPEMIXER_BINARY" --timeout 500 --json automation-status 9>&- 2>/dev/null)
+    case "$status" in *'"running":true'*) worker_pid=$(printf '%s\n' "$status" | sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p');; esac
+    stop_worker
+    exit 0
+}
+trap shutdown INT TERM EXIT
+
+while :; do
+    enabled=off
+    if [ -f "$preference" ]; then read -r enabled <"$preference"
+    elif [ -f "$configuration" ]; then enabled=on
+    fi
+    if [ "$enabled" != on ]; then
+        stop_worker
+        sleep 1
+        continue
+    fi
+    if [ ! -S "$XDG_RUNTIME_DIR/pipewire-0" ] || [ -z "$(pidof wireplumber)" ]; then
+        stop_worker
+        sleep 1
+        continue
+    fi
+    status=$("$PIPEMIXER_BINARY" --timeout 500 --json automation-status 9>&- 2>/dev/null)
+    case "$status" in
+        *'"running":true'*)
+            worker_pid=$(printf '%s\n' "$status" | sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p')
+            ;;
+        *)
+            # The audio supervisor starts routing only after startup restoration.
+            if [ "${PIPEMIXER_WAIT_ROUTING:-1}" = 1 ]; then
+                routing=$("$PIPEMIXER_BINARY" --timeout 1000 --json list-route-rules 9>&- 2>/dev/null)
+                case "$routing" in *'"engine_running":true'*) :;; *) sleep 1; continue;; esac
+            fi
+            if [ -n "$child_pid" ]; then wait "$child_pid" 2>/dev/null; fi
+            "$PIPEMIXER_BINARY" automation-daemon </dev/null >>/tmp/pipemixer-automation.log 2>&1 9>&- &
+            child_pid=$!
+            worker_pid=$child_pid
+            ;;
+    esac
+    sleep 1
+done

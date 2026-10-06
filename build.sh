@@ -111,4 +111,5 @@ if [[ ! -x "$BINARY" ]]; then
 fi
 
 echo "PipeMixer built: $BINARY"
+echo "DSP plugin built: $MESON_BUILD_DIR/pipemixer-dynamics.so"
 echo "Run with: $BINARY"

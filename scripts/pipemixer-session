@@ -1,0 +1,85 @@
+#!/bin/sh
+# Root audio session supervisor for the Luckfox SysV image.
+umask 077
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-/root/.config}"
+PIPEMIXER_BINARY="${PIPEMIXER_BINARY:-/usr/local/bin/pipemixer}"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+exec 9>"$XDG_RUNTIME_DIR/pipemixer-session.lock"
+flock -n 9 || exit 0
+
+pipewire_pid=
+wireplumber_pid=
+restore_pid=
+routing_pid=
+routing_session=
+restored_session=
+restore_retry=0
+
+stop_routing() {
+    if [ -n "$routing_pid" ]; then kill "$routing_pid" 2>/dev/null; wait "$routing_pid" 2>/dev/null; fi
+    routing_pid=
+    routing_session=
+}
+
+shutdown() {
+    trap - INT TERM EXIT
+    stop_routing
+    if [ -n "$restore_pid" ]; then kill "$restore_pid" 2>/dev/null; wait "$restore_pid" 2>/dev/null; fi
+    if [ -n "$wireplumber_pid" ]; then kill "$wireplumber_pid" 2>/dev/null; wait "$wireplumber_pid" 2>/dev/null; fi
+    if [ -n "$pipewire_pid" ]; then kill "$pipewire_pid" 2>/dev/null; wait "$pipewire_pid" 2>/dev/null; fi
+    exit 0
+}
+trap shutdown INT TERM EXIT
+
+while :; do
+    # A killed server can leave its socket behind. Its process must also be
+    # present before treating the socket as a live audio session.
+    if [ -z "$(pidof pipewire)" ]; then
+        stop_routing
+        [ -z "$pipewire_pid" ] || wait "$pipewire_pid" 2>/dev/null
+        /usr/bin/pipewire </dev/null >>/tmp/pipemixer-pipewire.log 2>&1 9>&- &
+        pipewire_pid=$!
+        restored_session=
+        restore_retry=0
+        sleep 1
+        continue
+    fi
+    if [ ! -S "$XDG_RUNTIME_DIR/pipewire-0" ]; then
+        sleep 1
+        continue
+    fi
+    wp_pids=$(pidof wireplumber)
+    if [ -z "$wp_pids" ]; then
+        stop_routing
+        [ -z "$wireplumber_pid" ] || wait "$wireplumber_pid" 2>/dev/null
+        /usr/bin/wireplumber </dev/null >>/tmp/pipemixer-wireplumber.log 2>&1 9>&- &
+        wireplumber_pid=$!
+        restored_session=
+        restore_retry=0
+        # Let the session manager enumerate cards before the available-device
+        # restore takes its snapshot. Missing USB devices remain optional.
+        sleep 2
+        continue
+    fi
+    socket_identity=$(stat -c '%i' "$XDG_RUNTIME_DIR/pipewire-0" 2>/dev/null)
+    session_identity="$socket_identity:$wp_pids"
+    if [ -n "$routing_session" ] && [ "$routing_session" != "$session_identity" ]; then stop_routing; fi
+    if [ "$restored_session" != "$session_identity" ] && [ "$restore_retry" -eq 0 ]; then
+        "$PIPEMIXER_BINARY" --timeout 30000 restore-startup </dev/null 9>&- &
+        restore_pid=$!
+        if wait "$restore_pid"; then restored_session=$session_identity; else restore_retry=15; fi
+        restore_pid=
+    fi
+    if [ "$restore_retry" -gt 0 ]; then restore_retry=$((restore_retry - 1)); fi
+    if [ "$restored_session" = "$session_identity" ]; then
+        if [ -z "$routing_pid" ] || ! kill -0 "$routing_pid" 2>/dev/null; then
+            [ -z "$routing_pid" ] || wait "$routing_pid" 2>/dev/null
+            "$PIPEMIXER_BINARY" routing-daemon </dev/null >>/tmp/pipemixer-routing.log 2>&1 9>&- &
+            routing_pid=$!
+            routing_session=$session_identity
+        fi
+    fi
+    sleep 2
+done

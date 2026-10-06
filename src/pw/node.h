@@ -17,6 +17,7 @@ enum media_class {
 };
 
 struct node;
+struct device;
 
 struct node *node_create(struct pw_node *pw_node, uint32_t id,
                          enum media_class media_class, const char *serial);
@@ -32,8 +33,15 @@ const struct dict *node_properties(const struct node *node);
 #define ALL_CHANNELS ((uint32_t)-1)
 
 void node_set_mute(const struct node *node, bool mute);
+/* Borrowed current values, or NULL until the first Props response. */
+const struct param_props *node_get_params(const struct node *node);
+int node_set_volumes(const struct node *node, const float volumes[], unsigned count);
 void node_change_volume(const struct node *node, bool absolute, float volume, uint32_t channel);
-void node_set_route(const struct node *node, uint32_t route_index);
+int node_set_route(const struct node *node, uint32_t route_index);
+const struct param_route *node_get_routes(const struct node *node, unsigned *count);
+bool node_routes_ready(const struct node *node);
+/* Device globals can arrive after their node's first info response. */
+void node_bind_device(struct node *node, struct device *device);
 bool node_set_default(const struct node *node);
 
 struct node_events {
@@ -55,4 +63,3 @@ struct node_events {
 struct event_hook *node_add_listener(struct node *node,
                                      const struct node_events *event,
                                      void *data);
-

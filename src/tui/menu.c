@@ -27,6 +27,7 @@ void tui_menu_free(struct tui_menu *menu) {
         wstring_free(&menu->items[i].wstr);
     }
     wstring_free(&menu->header);
+    if (menu->win) delwin(menu->win);
     free(menu);
 }
 
@@ -102,4 +103,3 @@ void tui_menu_draw(const struct tui_menu *const menu) {
 
     wnoutrefresh(win);
 }
-

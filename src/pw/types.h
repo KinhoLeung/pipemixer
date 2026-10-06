@@ -30,6 +30,7 @@ struct param_route {
     char *name;
 
     bool active;
+    pw_id_t availability;
 };
 
 void param_route_free_contents(struct param_route *route);
@@ -41,7 +42,7 @@ struct param_profile {
     char *name;
 
     bool active;
+    pw_id_t availability;
 };
 
 void param_profile_free_contents(struct param_profile *profile);
-
