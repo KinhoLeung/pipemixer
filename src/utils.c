@@ -31,15 +31,16 @@ bool key_code_from_key_name(const char *name, wint_t *keycode) {
         return false;
     }
 
-    if (name[1] == '\0' && isgraph(name[0])) {
+    const size_t length = strlen(name);
+    if (length == 1 && isgraph((unsigned char)name[0])) {
         /* printable ascii */
         *keycode = name[0];
         return true;
-    } else if (name[2] == '\0' || name[3] == '\0' || name[4] == '\0') {
+    } else if (length <= 4) {
         /* a single utf-8 char */
         wchar_t res;
-        int ret = mbrtowc(&res, name, 4, &(mbstate_t){0});
-        if (ret > 0 && name[ret] == '\0' && iswgraph(res)) {
+        size_t ret = mbrtowc(&res, name, length, &(mbstate_t){0});
+        if (ret == length && iswgraph(res)) {
             *keycode = res;
             return true;
         }
@@ -68,6 +69,13 @@ bool key_code_from_key_name(const char *name, wint_t *keycode) {
     }
 
     const char *suffix;
+    if (name[0] == 'f') {
+        uint32_t number;
+        if (spa_atou32(name + 1, &number, 10) && number >= 1 && number <= 12) {
+            *keycode = KEY_F(number);
+            return true;
+        }
+    }
     if (cut_prefix(name, "code:", &suffix)) {
         uint32_t code;
         if (spa_atou32(suffix, &code, 10)) {
@@ -137,4 +145,3 @@ bool cut_prefix(const char *str, const char *prefix, const char **suffix) {
     *suffix = str + prefix_len;
     return true;
 }
-

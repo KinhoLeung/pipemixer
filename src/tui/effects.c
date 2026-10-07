@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -23,11 +24,11 @@ static char opened_serial[32];
 static bool quit_pending;
 
 bool effect_ui_active(void){return view!=CLOSED||pending;}
-bool effect_ui_quit(void){if(!pending)return false;quit_pending=true;tui_notice("Completing the chain edit before exit...");return true;}
+bool effect_ui_quit(void){if(!pending)return false;quit_pending=true;tui_notice(tr("Completing the chain edit before exit..."));return true;}
 void effect_ui_cancel(void){view=CLOSED;}
 void effect_ui_cleanup(void){effect_ui_cancel();scene_job_free(pending,true);pending=NULL;}
 static const struct graph_node *current(void){return managed_find("effect",group,"input");}
-static bool read_chain(void){int r=effect_chain_read(current(),&chain);if(r<0){tui_notice(r==-EAGAIN?"Effect parameters are loading":r==-ENOENT?"Effect disappeared":strerror(-r));return false;}return true;}
+static bool read_chain(void){int r=effect_chain_read(current(),&chain);if(r<0){tui_notice(r==-EAGAIN?tr("Effect parameters are loading"):r==-ENOENT?tr("Effect disappeared"):strerror(-r));return false;}return true;}
 static int selected_stage(void){for(unsigned i=0;i<chain.count;i++)if(streq(stage_id,chain.stages[i].id))return i;return -1;}
 static void open_chain(void);
 static void update(void);
@@ -38,7 +39,7 @@ static int manual_controls(const struct graph_node *node,const char *names[],con
 }
 static void close_menu(void){tui_bind_cancel_selection((union tui_bind_data){0});}
 static void install(enum view next,unsigned count,tui_menu_callback_t callback){view=next;tui.menu=tui_menu_create(count);tui.menu->callback=callback;tui.menu_active=true;tui_menu_resize(tui.menu,tui.term_width,tui.term_height);}
-static void apply(void){char error[256]={0};pending=scene_edit_effect(group,&chain,error,sizeof(error));if(!pending)tui_notice(error[0]?error:strerror(errno));else tui_notice("Applying chain; restoring its connections...");}
+static void apply(void){char error[256]={0};pending=scene_edit_effect(group,&chain,error,sizeof(error));if(!pending)tui_notice(error[0]?error:strerror(errno));else tui_notice(tr("Applying chain; restoring its connections..."));}
 static void bypass(bool whole){
     if(!read_chain())return;
     const struct graph_node *node=current();char wet[96]="wet:Mult",dry[96]="dry:Mult";bool bypass;
@@ -49,11 +50,11 @@ static void bypass(bool whole){
 }
 static void choose_add(struct tui_menu *menu,struct tui_menu_item *pick){if(pending)return;unsigned n;const struct effect_processor *p=effect_processors(&n);if(pick->data.uint>=n||!read_chain())return;
     int r=effect_chain_add(&chain,p[pick->data.uint].name,chain.count);if(r<0){tui_notice(strerror(-r));return;}selection=chain.count-1;apply();close_menu();open_chain();}
-static void open_add(void){if(!read_chain())return;if(chain.count==EFFECT_STAGE_LIMIT){tui_notice("A chain supports at most 16 processors");return;}close_menu();unsigned n;effect_processors(&n);install(ADD,n,choose_add);for(unsigned i=0;i<n;i++)tui.menu->items[i].data.uint=i;update();}
+static void open_add(void){if(!read_chain())return;if(chain.count==EFFECT_STAGE_LIMIT){tui_notice(tr("A chain supports at most 16 processors"));return;}close_menu();unsigned n;effect_processors(&n);install(ADD,n,choose_add);for(unsigned i=0;i<n;i++)tui.menu->items[i].data.uint=i;update();}
 static void parameter_reset(struct tui_menu *menu,struct tui_menu_item *pick){if(pending)return;const struct graph_node *node=current();if(!node||pick->data.uint>=node->n_controls)return;const struct graph_control *c=&node->controls[pick->data.uint];const char *names[]={c->name};int r=manual_controls(node,names,&c->default_value,1);if(r<0)tui_notice(strerror(-r));}
 static void open_parameters(void){if(!read_chain())return;int index=selected_stage();if(index<0)return;const struct graph_node *node=current();unsigned count=0;
     for(unsigned i=0;i<node->n_controls;i++)if(node->controls[i].visible&&node->controls[i].writable&&effect_chain_stage_control(&chain.stages[index],node->controls[i].name))count++;
-    if(!count){tui_notice("No editable parameters");return;}close_menu();install(PARAMETERS,count,parameter_reset);count=0;
+    if(!count){tui_notice(tr("No editable parameters"));return;}close_menu();install(PARAMETERS,count,parameter_reset);count=0;
     for(unsigned i=0;i<node->n_controls;i++)if(node->controls[i].visible&&node->controls[i].writable&&effect_chain_stage_control(&chain.stages[index],node->controls[i].name))tui.menu->items[count++].data.uint=i;
     update();}
 static void choose_remove(struct tui_menu *menu,struct tui_menu_item *pick){if(pending)return;bool remove=pick->data.uint==1;if(!read_chain())return;int index=selected_stage();close_menu();
@@ -63,24 +64,24 @@ static void choose_chain(struct tui_menu *menu,struct tui_menu_item *pick){if(pe
     else if(index==chain.count)open_add();else bypass(true);}
 static void open_chain(void){if(!read_chain())return;snprintf(opened_serial,sizeof(opened_serial),"%s",dict_get(&current()->props,PW_KEY_OBJECT_SERIAL)?:"");install(CHAIN,chain.count+2,choose_chain);for(unsigned i=0;i<tui.menu->n_items;i++)tui.menu->items[i].data.uint=i;tui.menu->selected=selection<chain.count?selection:chain.count;update();}
 bool effect_ui_open(uint32_t id){const struct graph_node *node=graph_node_find(id);struct effect_chain candidate;int r=effect_chain_read(node,&candidate);if(r==-ENOTSUP)return false;
-    if(r<0){tui_notice(r==-EAGAIN?"Effect parameters are loading; press e again":strerror(-r));return true;}
+    if(r<0){tui_notice(r==-EAGAIN?tr("Effect parameters are loading; press e again"):strerror(-r));return true;}
     snprintf(group,sizeof(group),"%s",dict_get(&node->props,"pipemixer.group"));selection=0;*stage_id=0;open_chain();return true;}
 static void update(void){if(view==CLOSED||!tui.menu)return;
     wstring_clear(&tui.menu->header);
-    if(pending){wstring_printf(&tui.menu->header,L"Chain %s | applying...",group);return;}
-    const struct graph_node *node=current();if(!node){wstring_printf(&tui.menu->header,L"Effect disappeared | Esc to close");return;}
+    if(pending){wstring_printf(&tui.menu->header,trw(L"Chain %s | applying..."),group);return;}
+    const struct graph_node *node=current();if(!node){wstring_printf(&tui.menu->header,trw(L"Effect disappeared | Esc to close"));return;}
     for(unsigned i=0;i<tui.menu->n_items;i++)wstring_clear(&tui.menu->items[i].wstr);
-    if(view==ADD){unsigned count;const struct effect_processor *p=effect_processors(&count);wstring_printf(&tui.menu->header,L"Add processor | Enter: add  Esc: back");for(unsigned i=0;i<count;i++)wstring_printf(&tui.menu->items[i].wstr,L"%s (%s)",p[i].label,p[i].name);return;}
-    if(view==REMOVE){wstring_printf(&tui.menu->header,L"Remove %s?",stage_id);wstring_printf(&tui.menu->items[0].wstr,L"Cancel");wstring_printf(&tui.menu->items[1].wstr,L"Remove processor and its parameters");return;}
+    if(view==ADD){unsigned count;const struct effect_processor *p=effect_processors(&count);wstring_printf(&tui.menu->header,trw(L"Add processor | Enter: add  Esc: back"));for(unsigned i=0;i<count;i++)wstring_printf(&tui.menu->items[i].wstr,L"%s (%s)",tr(p[i].label),p[i].name);return;}
+    if(view==REMOVE){wstring_printf(&tui.menu->header,trw(L"Remove %s?"),stage_id);wstring_printf(&tui.menu->items[0].wstr,trw(L"Cancel"));wstring_printf(&tui.menu->items[1].wstr,trw(L"Remove processor and its parameters"));return;}
     if(effect_chain_read(node,&chain)<0)return;
-    if(view==PARAMETERS){wstring_printf(&tui.menu->header,L"%s / %s | h/l: adjust  Enter: reset  Space: bypass  Esc: back",group,stage_id);
-        for(unsigned i=0;i<tui.menu->n_items;i++){unsigned n=tui.menu->items[i].data.uint;if(n>=node->n_controls)continue;const struct graph_control *c=&node->controls[n];const char *label=strchr(c->name,':');wstring_printf(&tui.menu->items[i].wstr,L"%s = %.6g [%.6g .. %.6g]",label?label+1:c->name,c->value,c->minimum,c->maximum);}return;}
-    unsigned n;const struct effect_processor *p=effect_processors(&n);wstring_printf(&tui.menu->header,L"Chain %s | Enter: edit  a: add  d: remove  K/J: move  Space: bypass  B: all",group);
-    for(unsigned i=0;i<chain.count&&i<tui.menu->n_items-2;i++)wstring_printf(&tui.menu->items[i].wstr,L"%u. %s: %s [%s]",i+1,chain.stages[i].id,p[chain.stages[i].processor].label,chain.stages[i].bypass?"bypassed":"active");
-    if(tui.menu->n_items==chain.count+2){wstring_printf(&tui.menu->items[chain.count].wstr,L"Add processor...");wstring_printf(&tui.menu->items[chain.count+1].wstr,L"Whole chain [%s]",chain.wet==0&&chain.dry==1?"bypassed":"active");}
+    if(view==PARAMETERS){wstring_printf(&tui.menu->header,trw(L"%s / %s | h/l: adjust  Enter: reset  Space: bypass  Esc: back"),group,stage_id);
+        for(unsigned i=0;i<tui.menu->n_items;i++){unsigned n=tui.menu->items[i].data.uint;if(n>=node->n_controls)continue;const struct graph_control *c=&node->controls[n];const char *label=strchr(c->name,':');wstring_printf(&tui.menu->items[i].wstr,L"%s = %.6g [%.6g .. %.6g]",tr(label?label+1:c->name),c->value,c->minimum,c->maximum);}return;}
+    unsigned n;const struct effect_processor *p=effect_processors(&n);wstring_printf(&tui.menu->header,trw(L"Chain %s | Enter: edit  a: add  d: remove  K/J: move  Space: bypass  B: all"),group);
+    for(unsigned i=0;i<chain.count&&i<tui.menu->n_items-2;i++)wstring_printf(&tui.menu->items[i].wstr,L"%u. %s: %s [%s]",i+1,chain.stages[i].id,tr(p[chain.stages[i].processor].label),tr(chain.stages[i].bypass?"bypassed":"active"));
+    if(tui.menu->n_items==chain.count+2){wstring_printf(&tui.menu->items[chain.count].wstr,trw(L"Add processor..."));wstring_printf(&tui.menu->items[chain.count+1].wstr,trw(L"Whole chain [%s]"),tr(chain.wet==0&&chain.dry==1?"bypassed":"active"));}
 }
 bool effect_ui_key(wint_t key){
-    if(pending){if(key==27){close_menu();return true;}if(key==KEY_RESIZE)return false;tui_notice("Chain edit in progress");return true;}
+    if(pending){if(key==27){close_menu();return true;}if(key==KEY_RESIZE)return false;tui_notice(tr("Chain edit in progress"));return true;}
     if(view==CLOSED)return false;
     const struct graph_node *live=current();
     if(live&&!streq(opened_serial,dict_get(&live->props,PW_KEY_OBJECT_SERIAL))){close_menu();open_chain();return true;}
@@ -104,7 +105,7 @@ bool effect_ui_key(wint_t key){
 }
 bool effect_ui_poll(void){if(!effect_ui_active())return false;
     if(pending){char error[256]={0};int r=scene_step(pending,error,sizeof(error));if(r==-EAGAIN){update();return true;}
-        scene_job_free(pending,r<0);pending=NULL;tui_notice(r<0?(error[0]?error:strerror(-r)):"Chain updated; connections restored");
+        scene_job_free(pending,r<0);pending=NULL;tui_notice(r<0?(error[0]?error:strerror(-r)):tr("Chain updated; connections restored"));
         reopen=view!=CLOSED;if(reopen){close_menu();open_chain();}}
     if(!pending&&quit_pending){quit_pending=false;tui_bind_quit((union tui_bind_data){0});return true;}
     const struct graph_node *live=current();

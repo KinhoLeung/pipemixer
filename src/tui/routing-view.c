@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "tui/routing-view.h"
+#include "i18n.h"
 #include "xmalloc.h"
 #include "utils.h"
 #include "macros.h"
@@ -102,7 +103,7 @@ void routing_view_build(struct routing_axis *axis, enum pw_direction direction, 
             closed = folded(filter, group);
             struct routing_item *header = append(axis);
             header->key = xstrdup(group); header->group = xstrdup(group); header->ports = end - i; header->folded = closed;
-            xasprintf(&header->label, "%c %s (%u)", closed ? '+' : '-', name, end - i);
+            xasprintf(&header->label, "%c %s (%u)", closed ? '+' : '-', filter->grouping == ROUTING_KIND ? tr(name) : name, end - i);
         }
         if (!closed) for (unsigned p = i; p < end; p++) {
             struct routing_item *item = append(axis);

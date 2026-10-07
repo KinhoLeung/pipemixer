@@ -363,3 +363,57 @@ f6fa96703329c358e061277408eb0e3267dc550f56d616e168b174ed1e7ca3a9
 `/root/.local/share/pipemixer-tests/stage6-*.log`、`stage6-final-sha256.txt`；
 重启测试脚本及探针位于 `stage6-helpers/`。用法见 [中文自动化说明](../docs/AUTOMATION.md)。
 复杂条件和 MIDI/OSC 映射通过 JSON 编辑/导入，本轮 TUI 没有条件树编辑器。
+
+
+## 简体中文界面与语言切换
+
+2026-10-06 完成简体中文/英文 TUI。默认配置为 `[main] language=auto`，
+支持 `en`、`zh_CN`，以及环境覆盖 `PIPEMIXER_LANGUAGE`；`F2` 临时切换，
+关闭当前菜单但保留接线台视图和正在运行的音频任务。板上 root 配置已设为
+`language=zh_CN`，普通 `pipemixer` 启动入口默认显示中文。
+
+本机 ASan/UBSan 文本测试及 ARM 板上同一测试均通过：语言/locale 优先级、
+编译进程序的 370 条翻译查找、参数标识保留、位置格式参数、中文/组合字符宽度、
+异常 UTF-8，以及实际 curses 单元格的边缘截断。全部翻译格式的参数类型也逐项核对。
+
+候选版本顺序通过中文套件和八套英文回归：`board_i18n.py`、
+`board_routing.py`、`board_routing_groups.py`、`board_monitor_ui.py`、
+`board_effect_chain.py`、`board_capture_control.py`、`board_automation_ui.py`、
+`board_diagnostics.py`、`board_scenes.py`。英文套件包含真实 PCM、效果链重建、
+场景切换及录音收尾；测试后与开始前的完整场景快照一致。
+
+| 中文套件 | 实测内容 |
+| --- | --- |
+| 显示与输入 | 各功能面板、中文节点名称/搜索、双宽标签的鼠标点击位置、40×12 和 24×8 窄窗口边框 |
+| 语言切换 | INI/环境/自动 locale 选择、F2 中英文切换、菜单关闭、类型分组折叠保留、显式 C locale 回退英文 |
+| 音频控制 | 压缩器阈值实际变更、增加处理器、监听/Solo/监听源切换、中文总线删除；CLI 参数/类型标识和 JSON 保持原值 |
+| 后台任务 | 渐变期间 F2 切换，继续到达 50% 终点；中文路径下启动/停止录音及停止缓存，WAV 长度和 RIFF 收尾正确 |
+
+本轮首次连接时，板上仅有系统旧程序，此前的 `/usr/local` 安装和 S98/S99 服务
+已不存在。已重新安装测试通过的程序、DSP 插件、持久服务和原先验证的元数据兼容
+补丁，并保留系统旧程序备份。音频服务重启后的 ES7210 输入音量首次恢复存在延迟，
+补写原来的 100% 后确认正确。
+
+任务中断期间板子又发生整板重启，boot ID 从
+`56d8563b-0efd-4d02-88a8-2501acf757bf` 变为
+`5c4bd63d-d8e3-4149-a1bd-6e66771f6a8a`。新版安装和中文配置保留，S98/S99
+自动启动，ES7210 输入仍为 100%。临时候选测试详日志已随重启清空。
+
+重启后安装版再次通过完整中文套件及元数据解绑回归；未导出运行目录时，普通
+`pipemixer` 的中文默认启动、声卡/场景/自动化面板及 F2 均通过。
+连续 20 次语言切换期间 TUI RSS 固定为 4,552 KiB，INI SHA-256 不变。
+安装版测试前后的完整场景快照相同，图为 4 个物理节点、12 个音频端口、0 条连接；
+没有遗留虚拟路径、缓存或录音会话。
+
+持久证据保存在 `/root/.local/share/pipemixer-tests/i18n-*.log`、
+`i18n-installed-screen.txt` 和 `i18n-baseline-config/pipemixer/scenes/`；
+测试脚本与 PCM 探针位于 `i18n-helpers/`。用法见
+[中文说明的界面语言部分](../README.zh-CN.md#界面语言)。
+
+已安装中文版程序 SHA-256：
+
+```text
+25286083377225e892e6041aaa0b21d2720d6cf44511412119ccdc71db02d000
+```
+
+DSP 插件与兼容元数据模块沿用前一阶段记录的指纹。

@@ -10,6 +10,22 @@ Heavily inspired by [pulsemixer] and [pwvucontrol].
 The channel rows show a live peak meter in dBFS beside the volume setting.
 Meters monitor only the selected tab and decay after playback stops.
 
+The TUI supports English and Simplified Chinese, including the routing matrix,
+scenes, monitors, effects, diagnostics, recording and automation panels. Press
+`F2` to switch languages for the current session. This closes an open menu;
+matrix filters/folds and running audio, fades and recordings continue.
+
+Use `PIPEMIXER_LANGUAGE=zh_CN pipemixer` for a Chinese session or
+`PIPEMIXER_LANGUAGE=en pipemixer` for English. To persist your preference, set
+`language=zh_CN` or `language=en` in the existing `[main]` section of
+`~/.config/pipemixer/pipemixer.ini`. The default `language=auto` follows
+`LC_ALL`, `LC_MESSAGES`, then `LANG`; Chinese locales select Simplified Chinese.
+The environment override takes precedence over the INI. Chinese requires a
+UTF-8 locale and terminal font; an explicit `LC_ALL=C` keeps English active.
+CLI commands, JSON keys, stable names and parameter identifiers keep their
+original values. Rebind the switch with `toggle-language=f2` under `[binds]`;
+function key names `f1` through `f12` are supported.
+
 On a playback or recording stream, press `c` to choose an output or input device.
 Choose `Follow default` to let PipeWire use the system default again.
 The device port menu remains on `p`.

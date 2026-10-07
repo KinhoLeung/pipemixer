@@ -29,7 +29,7 @@ bool wstring_appendwc(struct wstring *s, wchar_t c) {
 bool wstring_appendsn(struct wstring *s, const char *suff, size_t suff_len) {
     const size_t suff_wchars = mbsnrtowcs(NULL, &(const char *){suff},
                                           suff_len, 0, &(mbstate_t){0});
-    if (suff_len == (size_t)-1) {
+    if (suff_wchars == (size_t)-1) {
         return false;
     }
 
@@ -94,4 +94,3 @@ void wstring_free(struct wstring *ws) {
     free(ws->data);
     wstring_init(ws);
 }
-

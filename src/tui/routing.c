@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,23 +33,28 @@ static void rebuild(void) {
     bool removed = routing_marks_prune(&routing.marked_outputs);
     removed |= routing_marks_prune(&routing.marked_inputs);
     if (removed) {
-        snprintf(routing.message, sizeof(routing.message), "Removed marks for changed or missing ports");
-        routing_batch_abort(&routing.batch, "selected endpoint changed or disappeared");
+        snprintf(routing.message, sizeof(routing.message), tr("Removed marks for changed or missing ports"));
+        routing_batch_abort(&routing.batch, tr("selected endpoint changed or disappeared"));
     }
     routing_view_build(&routing.outputs, PW_DIRECTION_OUTPUT, &routing.filter);
     routing_view_build(&routing.inputs, PW_DIRECTION_INPUT, &routing.filter);
+}
+
+void routing_language_changed(void) {
+    routing.message[0] = 0;
+    rebuild();
 }
 static void clear_marks(void) {
     routing_marks_clear(&routing.marked_outputs); routing_marks_clear(&routing.marked_inputs);
 }
 static void mark(bool input, bool node) {
-    if (routing.batch.active) { snprintf(routing.message, sizeof(routing.message), "Wait for batch completion or Esc to cancel"); return; }
+    if (routing.batch.active) { snprintf(routing.message, sizeof(routing.message), tr("Wait for batch completion or Esc to cancel")); return; }
     uint32_t *ids;
     unsigned count = routing_view_members(input ? &routing.inputs : &routing.outputs,
         input ? PW_DIRECTION_INPUT : PW_DIRECTION_OUTPUT, &routing.filter, node, &ids);
     if (!routing_marks_toggle(input ? &routing.marked_inputs : &routing.marked_outputs, ids, count))
-        snprintf(routing.message, sizeof(routing.message), "Selection limit is 256 ports per side");
-    else snprintf(routing.message, sizeof(routing.message), "Marked output:%u input:%u | c connect / d disconnect / u clear",
+        snprintf(routing.message, sizeof(routing.message), tr("Selection limit is 256 ports per side"));
+    else snprintf(routing.message, sizeof(routing.message), tr("Marked output:%u input:%u | c connect / d disconnect / u clear"),
                   routing.marked_outputs.count, routing.marked_inputs.count);
     free(ids);
 }
@@ -88,7 +94,7 @@ static void endpoint_text(int y, const char *prefix, const struct routing_axis *
     if (!item) return;
     uint32_t id = item->port;
     if (id == PW_ID_ANY) {
-        char *value; xasprintf(&value, "%s group: %s (%s)", prefix, item->label, item->folded ? "folded" : "expanded");
+        char *value; xasprintf(&value, tr("%s group: %s (%s)"), prefix, item->label, tr(item->folded ? "folded" : "expanded"));
         text(y, 0, routing.width, value); free(value); return;
     }
     const struct graph_port *port = graph_port_find(id);
@@ -103,12 +109,12 @@ static void check_pending(void) {
     if (routing.pending < 0) return;
     const struct graph_link *link = graph_link_between(routing.pending_output, routing.pending_input);
     if (!graph_port_find(routing.pending_output) || !graph_port_find(routing.pending_input)) {
-        routing_error("Selected port disappeared");
+        routing_error(tr("Selected port disappeared"));
     } else if (link && link->info->state == PW_LINK_STATE_ERROR) {
-        routing_error(link->info->error ?: "Connection failed");
+        routing_error(link->info->error ?: tr("Connection failed"));
     } else if ((!routing.pending && !link) ||
                (routing.pending && link && link->info->state >= PW_LINK_STATE_PAUSED)) {
-        snprintf(routing.message, sizeof(routing.message), "%s", routing.pending ? "Connected" : "Disconnected");
+        snprintf(routing.message, sizeof(routing.message), "%s", tr(routing.pending ? "Connected" : "Disconnected"));
         routing.pending = -1;
     }
 }
@@ -123,11 +129,11 @@ void routing_draw(int height, int width) {
     check_pending();
     werase(routing.win);
     char header[256];
-    snprintf(header, sizeof(header), "Routing matrix%s%s | M:monitor S:Solo L:listen U:clear Solo | ?:help",
+    snprintf(header, sizeof(header), tr("Routing matrix%s%s | M:monitor S:Solo L:listen U:clear Solo | ?:help"),
              *routing.monitor ? " | " : "", routing.monitor);
     text(0, 0, width, header);
     if (height < 8 || width < 28) {
-        text(2, 0, width, "Increase terminal size to see the matrix");
+        text(2, 0, width, tr("Increase terminal size to see the matrix"));
         wnoutrefresh(routing.win); return;
     }
     routing.left = MIN(40, MAX(12, width / 2));
@@ -137,7 +143,7 @@ void routing_draw(int height, int width) {
     if (routing.outputs.cursor >= routing.outputs.scroll + routing.visible_rows) routing.outputs.scroll = routing.outputs.cursor - routing.visible_rows + 1;
     routing.inputs.scroll = MIN(routing.inputs.scroll, routing.inputs.cursor);
     if (routing.inputs.cursor >= routing.inputs.scroll + routing.columns) routing.inputs.scroll = routing.inputs.cursor - routing.columns + 1;
-    char context[96]; snprintf(context, sizeof(context), "%s/%s O:%u I:%u", routing_grouping_name(routing.filter.grouping), routing_kind_name(routing.filter.kind), routing.marked_outputs.count, routing.marked_inputs.count);
+    char context[96]; snprintf(context, sizeof(context), "%s/%s O:%u I:%u", tr(routing_grouping_name(routing.filter.grouping)), tr(routing_kind_name(routing.filter.kind)), routing.marked_outputs.count, routing.marked_inputs.count);
     text(1, 0, routing.left, context);
     for (int c = 0; c < routing.columns && c + routing.inputs.scroll < (int)routing.inputs.count; c++) {
         const struct routing_item *item = &routing.inputs.items[c + routing.inputs.scroll];
@@ -149,7 +155,7 @@ void routing_draw(int height, int width) {
         text(1, routing.left + c * 7, 6, label);
         wattroff(routing.win, A_REVERSE);
     }
-    if (!routing.outputs.count || !routing.inputs.count) text(3, 0, width, "No matching audio ports available");
+    if (!routing.outputs.count || !routing.inputs.count) text(3, 0, width, tr("No matching audio ports available"));
     for (int r = 0; r < routing.visible_rows && r + routing.outputs.scroll < (int)routing.outputs.count; r++) {
         const struct routing_item *item = &routing.outputs.items[r + routing.outputs.scroll];
         uint32_t id = item->port;
@@ -168,10 +174,10 @@ void routing_draw(int height, int width) {
             wattroff(routing.win, A_REVERSE);
         }
     }
-    endpoint_text(routing.height - 3, "Output:", &routing.outputs);
-    endpoint_text(routing.height - 2, "Input: ", &routing.inputs);
-    char search[512]; snprintf(search, sizeof(search), "Find: %s%s | %s", routing.filter.text, routing.searching ? "_" : "", routing.searching ? "Enter apply / Esc cancel" : routing.message);
-    text(routing.height - 1, 0, width, routing.searching || *routing.filter.text ? search : routing.message[0] ? routing.message : "+ connected  . disconnected  ! error  ~ negotiating");
+    endpoint_text(routing.height - 3, tr("Output:"), &routing.outputs);
+    endpoint_text(routing.height - 2, tr("Input: "), &routing.inputs);
+    char search[512]; snprintf(search, sizeof(search), tr("Find: %s%s | %s"), routing.filter.text, routing.searching ? "_" : "", routing.searching ? tr("Enter apply / Esc cancel") : routing.message);
+    text(routing.height - 1, 0, width, routing.searching || *routing.filter.text ? search : routing.message[0] ? routing.message : tr("+ connected  . disconnected  ! error  ~ negotiating"));
     wnoutrefresh(routing.win);
 }
 
@@ -187,12 +193,12 @@ static void toggle(void) {
     bool connected = graph_link_between(output, input) != NULL;
     int result = connected ? graph_disconnect(output, input) : graph_connect(output, input);
     if (result < 0) {
-        routing_error(result == -ELOOP ? "Connection would create a feedback loop" : strerror(-result));
+        routing_error(result == -ELOOP ? tr("Connection would create a feedback loop") : strerror(-result));
     } else {
         routing.pending = !connected;
         routing.pending_output = output;
         routing.pending_input = input;
-        snprintf(routing.message, sizeof(routing.message), "%s", connected ? "Disconnecting..." : "Connecting...");
+    snprintf(routing.message, sizeof(routing.message), "%s", tr(connected ? "Disconnecting..." : "Connecting..."));
     }
 }
 
@@ -202,7 +208,7 @@ bool routing_key(wint_t key, bool special) {
         || key == 'n' || key == 'N' || key == 'u' || key == 'c' || key == 'd' || key == 'f' || key == '/'
         || key == 'M' || key == 'S' || key == 'L' || key == 'U')) {
         if (key == 27) routing_batch_abort(&routing.batch, "cancelled");
-        else snprintf(routing.message, sizeof(routing.message), "Wait for batch completion or Esc to cancel");
+        else snprintf(routing.message, sizeof(routing.message), tr("Wait for batch completion or Esc to cancel"));
         return true;
     }
     if (routing.searching && key != KEY_RESIZE) {
@@ -234,20 +240,20 @@ bool routing_key(wint_t key, bool special) {
     case 'f': clear_marks(); routing.filter.kind = (routing.filter.kind + 1) % ROUTING_KIND_COUNT; break;
     case 'x': case 'X': mark(key == 'X', false); break;
     case 'n': case 'N': mark(key == 'N', true); break;
-    case 'u': clear_marks(); snprintf(routing.message, sizeof(routing.message), "Selection cleared"); break;
+    case 'u': clear_marks(); snprintf(routing.message, sizeof(routing.message), tr("Selection cleared")); break;
     case 'c': case 'd': {
         int result = routing.pending >= 0 ? -EBUSY : routing_batch_start(&routing.batch, &routing.marked_outputs, &routing.marked_inputs, key == 'd');
         if (result == 0) snprintf(routing.message, sizeof(routing.message), "%s", routing.batch.message);
-        else snprintf(routing.message, sizeof(routing.message), "%s", result == -ELOOP ? "Batch rejected: feedback loop; no links changed"
-            : result == -EINVAL ? "Mark output ports with x/n and inputs with X/N first"
-            : result == -ENOTSUP ? "Marked ports have no compatible audio channels" : strerror(-result));
+        else snprintf(routing.message, sizeof(routing.message), "%s", result == -ELOOP ? tr("Batch rejected: feedback loop; no links changed")
+            : result == -EINVAL ? tr("Mark output ports with x/n and inputs with X/N first")
+            : result == -ENOTSUP ? tr("Marked ports have no compatible audio channels") : strerror(-result));
         break;
     }
-    case '?': snprintf(routing.message, sizeof(routing.message), "hjkl move; Enter/Space link; z/Z fold; x/X mark; n/N node; c/d batch; u clear; a/A rule; r back"); break;
+    case '?': snprintf(routing.message, sizeof(routing.message), tr("hjkl move; Enter/Space link; z/Z fold; x/X mark; n/N node; c/d batch; u clear; a/A rule; r back")); break;
     case '/': strcpy(routing.previous_filter, routing.filter.text); routing.searching = true; break;
     case 'z': case 'Z':
         if (!routing_view_fold(key == 'z' ? &routing.outputs : &routing.inputs, &routing.filter))
-            snprintf(routing.message, sizeof(routing.message), "Press v to group ports before folding");
+            snprintf(routing.message, sizeof(routing.message), tr("Press v to group ports before folding"));
         break;
     case ' ': case '\n': case KEY_ENTER: toggle(); break;
     default: return false;
@@ -280,16 +286,16 @@ void routing_mouse(const MEVENT *event) {
 }
 
 void routing_error(const char *message) {
-    snprintf(routing.message, sizeof(routing.message), "%s", message ?: "PipeWire error");
+    snprintf(routing.message, sizeof(routing.message), "%s", message ?: tr("PipeWire error"));
     routing.pending = -1;
-    routing_batch_abort(&routing.batch, message ?: "PipeWire error");
+    routing_batch_abort(&routing.batch, message ?: tr("PipeWire error"));
 }
 bool routing_poll(void) {
     bool removed = routing_marks_prune(&routing.marked_outputs);
     removed |= routing_marks_prune(&routing.marked_inputs);
     if (removed) {
-        routing_batch_abort(&routing.batch, "selected endpoint changed or disappeared");
-        snprintf(routing.message, sizeof(routing.message), "Removed marks for changed or missing ports");
+        routing_batch_abort(&routing.batch, tr("selected endpoint changed or disappeared"));
+        snprintf(routing.message, sizeof(routing.message), tr("Removed marks for changed or missing ports"));
     }
     bool changed = routing_batch_step(&routing.batch);
     if (changed) snprintf(routing.message, sizeof(routing.message), "%s", routing.batch.message);

@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include <sys/eventfd.h>
 #include <sys/ioctl.h>
 #include <assert.h>
@@ -12,6 +13,7 @@
 
 #include "tui/tui.h"
 #include "tui/pad.h"
+#include "tui/text.h"
 #include "tui/routing.h"
 #include "tui/monitors.h"
 #include "tui/effects.h"
@@ -44,7 +46,7 @@ enum color_pair {
 struct tui tui = {0};
 static bool button_motion_tracking = false;
 static WINDOW *notice_win;
-static char notice[256];
+static char notice[1024];
 static time_t notice_until;
 static uint32_t effect_menu_id = PW_ID_ANY;
 static struct scene_job *scene_pending;
@@ -63,7 +65,7 @@ static struct {
 } audio_pending;
 
 static void show_notice(const char *message) {
-    snprintf(notice, sizeof(notice), "%s", message);
+    snprintf(notice, sizeof(notice), "%s", tr(message));
     notice_until = time(NULL) + 6;
 }
 void tui_notice(const char *message) { show_notice(message); }
@@ -118,11 +120,11 @@ static enum tui_tab_type media_class_to_tui_tab(enum media_class class) {
 
 static const char *tui_tab_name(enum tui_tab_type tab) {
     switch (tab) {
-    case PLAYBACK: return "Playback";
-    case RECORDING: return "Recording";
-    case OUTPUT_DEVICES: return "Output Devices";
-    case INPUT_DEVICES: return "Input Devices";
-    case CARDS: return "Cards";
+    case PLAYBACK: return tr("Playback");
+    case RECORDING: return tr("Recording");
+    case OUTPUT_DEVICES: return tr("Output Devices");
+    case INPUT_DEVICES: return tr("Input Devices");
+    case CARDS: return tr("Cards");
     default: ABORT("Invalid tab type passed to tui_tab_name");
     }
 }
@@ -290,7 +292,7 @@ static void tui_tab_item_draw_node(const struct tui_tab_item *const item,
                 const float scaled = fmaxf(0, fminf(1, (db + 60.0f) / 60.0f));
                 const int filled = level > 0 ? MAX(1, (int)ceilf(scaled * meter_width)) : 0;
 
-                mvwaddstr(win, pos, info_area_start, "Pk [");
+                mvwaddstr(win, pos, info_area_start, tr("Pk ["));
                 for (int j = 0; j < meter_width; j++) {
                     const bool full = j < filled;
                     const int pair = !full ? DEFAULT
@@ -305,7 +307,7 @@ static void tui_tab_item_draw_node(const struct tui_tab_item *const item,
                           "] %4s %2s", value,
                           d->meter && !peak_meter_failed(d->meter) ? "dB" : "  ");
             } else if (info_area_width >= 7) {
-                mvwprintw(win, pos, info_area_start, "Pk %4s", value);
+                mvwprintw(win, pos, info_area_start, tr("Pk %4s"), value);
             }
         }
 
@@ -366,20 +368,20 @@ static void tui_tab_item_draw_node(const struct tui_tab_item *const item,
 
         int cols = 0;
         cols += print_with_ellipsis(win, routes_line_pos, 1,
-                                    L"Routes: ", wcslen(L"Routes: "),
+                                    trw(L"Routes: "), wcslen(trw(L"Routes: ")),
                                     usable_width);
 
         if (!d->n_routes) {
             wattron(win, A_DIM);
             cols += print_with_ellipsis(win, routes_line_pos, 1 + cols,
-                                        L"(none)", wcslen(L"(none)"),
+                                        trw(L"(none)"), wcslen(trw(L"(none)")),
                                         usable_width - cols);
         } else {
             if (d->active_route) {
                 /* draw active route first */
                 cols += print_with_ellipsis(win, routes_line_pos, 1 + cols,
-                                            d->active_route->description.data,
-                                            d->active_route->description.len,
+                                            trw(d->active_route->description.data),
+                                            wcslen(trw(d->active_route->description.data)),
                                             usable_width - cols);
             }
 
@@ -398,7 +400,7 @@ static void tui_tab_item_draw_node(const struct tui_tab_item *const item,
                 }
 
                 cols += print_with_ellipsis(win, routes_line_pos, 1 + cols,
-                                            p->description.data, p->description.len,
+                                            trw(p->description.data), wcslen(trw(p->description.data)),
                                             usable_width - cols);
             }
         }
@@ -480,20 +482,20 @@ static void tui_tab_item_draw_device(const struct tui_tab_item *const item,
 
         int cols = 0;
         cols += print_with_ellipsis(win, profiles_line_pos, 1,
-                                    L"Profiles: ", wcslen(L"Profiles: "),
+                                    trw(L"Profiles: "), wcslen(trw(L"Profiles: ")),
                                     usable_width);
 
         if (!d->n_profiles) {
             wattron(win, A_DIM);
             cols += print_with_ellipsis(win, profiles_line_pos, 1 + cols,
-                                        L"(none)", wcslen(L"(none)"),
+                                        trw(L"(none)"), wcslen(trw(L"(none)")),
                                         usable_width - cols);
         } else {
             if (d->active_profile) {
                 /* draw active profile first */
                 cols += print_with_ellipsis(win, profiles_line_pos, 1 + cols,
-                                            d->active_profile->description.data,
-                                            d->active_profile->description.len,
+                                            trw(d->active_profile->description.data),
+                                            wcslen(trw(d->active_profile->description.data)),
                                             usable_width - cols);
             }
 
@@ -510,7 +512,7 @@ static void tui_tab_item_draw_device(const struct tui_tab_item *const item,
                                             usable_width - cols);
 
                 cols += print_with_ellipsis(win, profiles_line_pos, 1 + cols,
-                                            p->description.data, p->description.len,
+                                            trw(p->description.data), wcslen(trw(p->description.data)),
                                             usable_width - cols);
             }
         }
@@ -749,34 +751,43 @@ static void redraw_current_tab(void) {
 
     if (bottom == 0) {
         /* empty tab */
-        static const char empty[] = "Empty";
+        const char *empty = tr("Empty");
         wattron(tui.pad_win, A_DIM);
-        mvwaddstr(tui.pad_win,
-                  (tui.term_height - 1) / 2, (tui.term_width / 2) - (strlen(empty) / 2),
-                  empty);
+        tui_write_text(tui.pad_win, (tui.term_height - 1) / 2,
+                       MAX(0, (tui.term_width - tui_text_width(empty)) / 2),
+                       empty, tui.term_width);
         wattroff(tui.pad_win, A_DIM);
     }
 }
 
 static void redraw_status_bar(void) {
-    wmove(tui.bar_win, 0, 0);
-
+    werase(tui.bar_win);
+    int x = 0;
     FOR_EACH_TAB(tab_index) {
-        if (tab_index != tui.tab_index) {
-            wattron(tui.bar_win, A_DIM);
-        } else {
-            wattron(tui.bar_win, A_BOLD);
-        }
-        waddstr(tui.bar_win, tui_tab_name(tui.tabs[tab_index].type));
-        if (tab_index != tui.tab_index) {
-            wattroff(tui.bar_win, A_DIM);
-        } else {
-            wattroff(tui.bar_win, A_BOLD);
-        }
-        waddstr(tui.bar_win, "   ");
+        int attribute = tab_index == tui.tab_index ? A_BOLD : A_DIM;
+        wattron(tui.bar_win, attribute);
+        const char *name = tui_tab_name(tui.tabs[tab_index].type);
+        tui_write_text(tui.bar_win, 0, x, name, tui.term_width - x);
+        wattroff(tui.bar_win, attribute);
+        x += tui_text_width(name) + 3;
     }
+    const char *hint = tr("F2: language");
+    if (x + tui_text_width(hint) < tui.term_width)
+        tui_write_text(tui.bar_win, 0, x, hint, tui.term_width - x);
+}
 
-    wclrtoeol(tui.bar_win);
+void tui_bind_toggle_language(union tui_bind_data data) {
+    if (!i18n_toggle_language()) {
+        show_notice("Chinese requires a UTF-8 locale; language remains English");
+        return;
+    }
+    /* Reopen menus in the new language; detached operations keep running. */
+    tui_bind_cancel_selection((union tui_bind_data){0});
+    routing_language_changed();
+    redraw_current_tab();
+    redraw_status_bar();
+    show_notice(i18n_is_chinese() ? "Language: Chinese (F2 switches back)"
+                               : "Language: English (F2 switches back)");
 }
 
 void tui_bind_focus_last(union tui_bind_data data) {
@@ -976,7 +987,7 @@ static const char *target_node_label(const struct node *node) {
     const struct dict *props = node_properties(node);
     const char *description = dict_get(props, "node.description");
     const char *name = dict_get(props, "node.name");
-    return description ?: name ?: "Unnamed device";
+    return description ?: name ?: tr("Unnamed device");
 }
 
 struct target_menu_candidates {
@@ -1037,13 +1048,13 @@ void tui_bind_select_target(union tui_bind_data data) {
     tui.menu->callback = on_target_selection_done;
     tui.menu->data.uint = focused->as.node.id;
     tui_menu_resize(tui.menu, tui.term_width, tui.term_height);
-    wstring_printf(&tui.menu->header, L"Select %ls for %ls",
-                   stream_class == STREAM_OUTPUT_AUDIO ? L"output" : L"input",
-                   focused->as.node.description.data ?: L"stream");
+    wstring_printf(&tui.menu->header, trw(L"Select %ls for %ls"),
+                   stream_class == STREAM_OUTPUT_AUDIO ? trw(L"output") : trw(L"input"),
+                   focused->as.node.description.data ?: trw(L"stream"));
 
     struct tui_menu_item *item = &tui.menu->items[0];
-    wstring_printf(&item->wstr, L"Follow default %ls",
-                   stream_class == STREAM_OUTPUT_AUDIO ? L"output" : L"input");
+    wstring_printf(&item->wstr, trw(L"Follow default %ls"),
+                   stream_class == STREAM_OUTPUT_AUDIO ? trw(L"output") : trw(L"input"));
     item->data.uint = PW_ID_ANY;
 
     const uint32_t current_target = pipewire_get_stream_target(focused->as.node.id);
@@ -1075,15 +1086,15 @@ static void collect_managed(const struct graph_node *node, void *data) {
 }
 
 static void start_audio(const char *kind, uint32_t source, uint32_t destination, const char *preset) {
-    if (audio_pending.active) { show_notice("An audio path is still being created"); return; }
+    if (audio_pending.active) { show_notice(tr("An audio path is still being created")); return; }
     unsigned index = 1;
     do { snprintf(audio_pending.name, sizeof(audio_pending.name), "%s%u", kind, index++); }
     while (managed_find(kind, audio_pending.name, NULL));
     char *src = NULL, *dest = NULL;
     if (streq(kind, "send")) {
         const struct graph_node *s = graph_node_find(source), *d = graph_node_find(destination);
-        if (!s || !d) { show_notice("Selected audio endpoint disappeared"); return; }
-        if (graph_would_cycle(source, destination)) { show_notice("Send would create a feedback loop"); return; }
+        if (!s || !d) { show_notice(tr("Selected audio endpoint disappeared")); return; }
+        if (graph_would_cycle(source, destination)) { show_notice(tr("Send would create a feedback loop")); return; }
         xasprintf(&src, "serial:%s", dict_get(&s->props, PW_KEY_OBJECT_SERIAL));
         xasprintf(&dest, "serial:%s", dict_get(&d->props, PW_KEY_OBJECT_SERIAL));
     }
@@ -1093,7 +1104,7 @@ static void start_audio(const char *kind, uint32_t source, uint32_t destination,
     snprintf(audio_pending.kind, sizeof(audio_pending.kind), "%s", kind);
     audio_pending.active = true;
     audio_pending.deadline = time(NULL) + 8;
-    show_notice("Creating audio path...");
+    show_notice(tr("Creating audio path..."));
 }
 
 static void on_send_selected(struct tui_menu *menu, struct tui_menu_item *pick) {
@@ -1105,12 +1116,12 @@ static void on_send_selected(struct tui_menu *menu, struct tui_menu_item *pick) 
 static void select_send_destination(uint32_t source) {
     struct target_menu_candidates candidates = { .media_class = AUDIO_SINK };
     pipewire_foreach_node(collect_target_node, &candidates);
-    if (!candidates.count) { show_notice("No audio sink available"); free(candidates.nodes); return; }
+    if (!candidates.count) { show_notice(tr("No audio sink available")); free(candidates.nodes); return; }
     qsort(candidates.nodes, candidates.count, sizeof(candidates.nodes[0]), compare_target_nodes);
     tui.menu = tui_menu_create(candidates.count);
     tui.menu->callback = on_send_selected;
     tui.menu->data.uint = source;
-    wstring_printf(&tui.menu->header, L"Send a copy to an output device or bus");
+    wstring_printf(&tui.menu->header, trw(L"Send a copy to an output device or bus"));
     for (unsigned i = 0; i < candidates.count; i++) {
         wstring_printf(&tui.menu->items[i].wstr, L"%s (id:%u)", target_node_label(candidates.nodes[i]), node_id(candidates.nodes[i]));
         tui.menu->items[i].data.uint = node_id(candidates.nodes[i]);
@@ -1128,10 +1139,10 @@ static void on_audio_selected(struct tui_menu *menu, struct tui_menu_item *pick)
     else {
         const struct graph_node *node = graph_node_find(action);
         if (!node || !streq(dict_get(&node->props, "pipemixer.managed"), "1")) {
-            show_notice("Audio path already disappeared"); return;
+            show_notice(tr("Audio path already disappeared")); return;
         }
         int result = managed_remove(dict_get(&node->props, "pipemixer.kind"), dict_get(&node->props, "pipemixer.group"));
-        show_notice(result < 0 ? strerror(-result) : "Removing audio path...");
+        show_notice(result < 0 ? strerror(-result) : tr("Removing audio path..."));
     }
 }
 
@@ -1147,16 +1158,16 @@ void tui_bind_manage_audio(union tui_bind_data data) {
     tui.menu = tui_menu_create(base + candidates.count);
     tui.menu->callback = on_audio_selected;
     tui.menu->data.uint = source;
-    wstring_printf(&tui.menu->header, L"Audio buses and independent sends");
-    wstring_printf(&tui.menu->items[0].wstr, L"Create a stereo bus (virtual output + microphone)");
+    wstring_printf(&tui.menu->header, trw(L"Audio buses and independent sends"));
+    wstring_printf(&tui.menu->items[0].wstr, trw(L"Create a stereo bus (virtual output + microphone)"));
     tui.menu->items[0].data.uint = PW_ID_ANY;
     if (can_send) {
-        wstring_printf(&tui.menu->items[1].wstr, L"Create an independent send from the focused node");
+        wstring_printf(&tui.menu->items[1].wstr, trw(L"Create an independent send from the focused node"));
         tui.menu->items[1].data.uint = PW_ID_ANY - 1;
     }
     for (unsigned i = 0; i < candidates.count; i++) {
         const struct graph_node *node = graph_node_find(candidates.ids[i]);
-        wstring_printf(&tui.menu->items[base + i].wstr, L"Delete %s %s", dict_get(&node->props, "pipemixer.kind"), dict_get(&node->props, "pipemixer.group"));
+        wstring_printf(&tui.menu->items[base + i].wstr, trw(L"Delete %s %s"), tr(dict_get(&node->props, "pipemixer.kind")), dict_get(&node->props, "pipemixer.group"));
         tui.menu->items[base + i].data.uint = node->id;
     }
     free(candidates.ids);
@@ -1169,13 +1180,13 @@ static void refresh_effect_menu(void) {
     const struct graph_node *node = graph_node_find(effect_menu_id);
     if (!node) {
         tui_bind_cancel_selection((union tui_bind_data){0});
-        show_notice("Effect disappeared");
+        show_notice(tr("Effect disappeared"));
         return;
     }
     const struct graph_control *wet = graph_control_find(node, "wet:Mult");
     const struct graph_control *dry = graph_control_find(node, "dry:Mult");
     wstring_clear(&tui.menu->header);
-    wstring_printf(&tui.menu->header, L"%s: h/l adjust, Enter reset, Space bypass%s",
+    wstring_printf(&tui.menu->header, trw(L"%s: h/l adjust, Enter reset, Space bypass%s"),
                    dict_get(&node->props, "pipemixer.group"),
                    wet && dry && wet->value == 0 && dry->value == 1 ? " [ON]" : "");
     for (unsigned i = 0; i < tui.menu->n_items; i++) {
@@ -1184,7 +1195,7 @@ static void refresh_effect_menu(void) {
         const struct graph_control *control = &node->controls[index];
         wstring_clear(&tui.menu->items[i].wstr);
         wstring_printf(&tui.menu->items[i].wstr, L"%s = %.6g  [%.6g, %.6g]",
-                       control->name, control->value, control->minimum, control->maximum);
+                       tr_parameter(control->name), control->value, control->minimum, control->maximum);
     }
 }
 
@@ -1205,33 +1216,33 @@ static void on_scene_selected(struct tui_menu *menu, struct tui_menu_item *pick)
     char error[256] = {0}; int result;
     if (action == 0) {
         result = scene_save(name, error, sizeof(error));
-        if (!result) snprintf(error, sizeof(error), "Saved scene %s; press s to load it", name);
-        else if (result == -EAGAIN) snprintf(error, sizeof(error), "Audio state is still updating; retry saving shortly");
+        if (!result) snprintf(error, sizeof(error), tr("Saved scene %s; press s to load it"), name);
+        else if (result == -EAGAIN) snprintf(error, sizeof(error), tr("Audio state is still updating; retry saving shortly"));
     } else if (action == PW_ID_ANY || action % 3 == 0) {
         result = scene_startup_set(name, error, sizeof(error));
-        if (!result) snprintf(error, sizeof(error), streq(name, "off") ? "Startup scene restoration disabled" : "Startup scene set to %s", name);
+        if (!result) snprintf(error, sizeof(error), streq(name, "off") ? tr("Startup scene restoration disabled") : tr("Startup scene set to %s"), name);
     } else if (action % 3 == 2) {
         result = scene_delete(name);
-        snprintf(error, sizeof(error), result < 0 ? "Cannot delete scene: %s" : "Deleted scene %s", result < 0 ? strerror(-result) : name);
+        snprintf(error, sizeof(error), result < 0 ? tr("Cannot delete scene: %s") : tr("Deleted scene %s"), result < 0 ? strerror(-result) : name);
     } else {
         scene_pending = scene_load(name, error, sizeof(error));
-        if (scene_pending) { scene_deadline = time(NULL) + 30; snprintf(error, sizeof(error), "Loading scene %s...", name); }
+        if (scene_pending) { scene_deadline = time(NULL) + 30; snprintf(error, sizeof(error), tr("Loading scene %s..."), name); }
     }
-    show_notice(error[0] ? error : "Scene operation failed");
+    show_notice(error[0] ? error : tr("Scene operation failed"));
 }
 
 static void update_route_menu(void) {
-    wstring_printf(&tui.menu->header, L"Automatic routing | engine: %s | h/l: priority", route_rules_running() ? "running" : "stopped");
+    wstring_printf(&tui.menu->header, trw(L"Automatic routing | engine: %s | h/l: priority"), tr(route_rules_running() ? "running" : "stopped"));
     struct route_rule_state *states = xcalloc(route_menu_count ?: 1, sizeof(*states));
     route_rules_observe(route_menu_rules, route_menu_count, states);
     for (unsigned i = 0; i < route_menu_count; i++) {
         const struct route_rule *rule = &route_menu_rules[i];
         struct route_rule_state state = states[i];
-        const char *target = state.active_target == -2 ? "multiple targets" : state.active_target > 0 ? rule->fallbacks[state.active_target - 1] : rule->input;
+        const char *target = state.active_target == -2 ? tr("multiple targets") : state.active_target > 0 ? rule->fallbacks[state.active_target - 1] : rule->input;
         wstring_printf(&tui.menu->items[i * 2].wstr, L"%s %s [%s %u/%u%s%s p=%d g=%s]: %s -> %s",
-                       rule->enabled ? "Disable" : "Enable", rule->name, state.state, state.connected_pairs, state.total_pairs,
-                       rule->glob ? " glob" : "", state.using_fallback ? " fallback" : "", rule->priority, rule->group ?: "-", rule->output, target);
-        wstring_printf(&tui.menu->items[i * 2 + 1].wstr, L"Delete %s", rule->name);
+                       tr(rule->enabled ? "Disable" : "Enable"), rule->name, tr(state.state), state.connected_pairs, state.total_pairs,
+                       rule->glob ? tr(" glob") : "", state.using_fallback ? tr(" fallback") : "", rule->priority, rule->group ?: "-", rule->output, target);
+        wstring_printf(&tui.menu->items[i * 2 + 1].wstr, trw(L"Delete %s"), rule->name);
     }
     free(states);
 }
@@ -1244,7 +1255,7 @@ static bool routing_rule_key(wint_t ch) {
     char error[256] = {0};
     if (route_rule_set_priority(rule->name, priority, NULL, error, sizeof(error)) == 0) {
         rule->priority = priority; update_route_menu();
-        snprintf(error, sizeof(error), "Rule %s priority set to %d", rule->name, priority);
+        snprintf(error, sizeof(error), tr("Rule %s priority set to %d"), rule->name, priority);
     }
     show_notice(error); return true;
 }
@@ -1256,7 +1267,7 @@ static char *node_port_pattern(uint32_t node) {
 }
 
 void tui_bind_save_routing_batch(union tui_bind_data data) {
-    if (!tui.routing_active) { show_notice("Press r and select source/destination nodes before saving a batch rule"); return; }
+    if (!tui.routing_active) { show_notice(tr("Press r and select source/destination nodes before saving a batch rule")); return; }
     tui_bind_manage_routing_rules((union tui_bind_data){.index = 1});
 }
 
@@ -1269,11 +1280,11 @@ static void on_route_rule_selected(struct tui_menu *menu, struct tui_menu_item *
     }
     tui_bind_cancel_selection((union tui_bind_data){0});
     char error[256] = {0}; int result;
-    if (action == PW_ID_ANY) { show_notice("Press r, select output/input ports, then a to save an automatic routing rule"); return; }
+    if (action == PW_ID_ANY) { show_notice(tr("Press r, select output/input ports, then a to save an automatic routing rule")); return; }
     if (action % 2) result = route_rule_delete(name, error, sizeof(error));
     else result = route_rule_enable(name, !enabled, error, sizeof(error));
-    if (!result) snprintf(error, sizeof(error), "Rule %s %s; the running engine applies changes automatically", name,
-                          action % 2 ? "deleted" : enabled ? "disabled" : "enabled");
+    if (!result) snprintf(error, sizeof(error), tr("Rule %s %s; the running engine applies changes automatically"), name,
+                          tr(action % 2 ? "deleted" : enabled ? "disabled" : "enabled"));
     show_notice(error);
 }
 
@@ -1284,7 +1295,7 @@ void tui_bind_manage_routing_rules(union tui_bind_data data) {
     if (result < 0) { if (tui.routing_active) routing_error(error); else show_notice(error); return; }
     if (tui.routing_active) {
         uint32_t output, input;
-        if (!routing_selected(&output, &input)) { route_rules_free(rules, count); routing_error("Select an audio output and input port first"); return; }
+        if (!routing_selected(&output, &input)) { route_rules_free(rules, count); routing_error(tr("Select an audio output and input port first")); return; }
         char name[49];
         for (unsigned n = 1; ; n++) {
             snprintf(name, sizeof(name), "route%u", n); bool used = false;
@@ -1301,39 +1312,39 @@ void tui_bind_manage_routing_rules(union tui_bind_data data) {
             xasprintf(&destination, "%s:%s", graph_node_name(in->node_id), dict_get(&in->props, PW_KEY_PORT_NAME));
         }
         result = route_rule_create_glob(name, source, destination, batch, error, sizeof(error)); free(source); free(destination);
-        if (!result) snprintf(error, sizeof(error), "Saved rule %s; press r then a to manage automatic routing", name);
+        if (!result) snprintf(error, sizeof(error), tr("Saved rule %s; press r then a to manage automatic routing"), name);
         routing_error(error); return;
     }
     route_menu_rules = rules; route_menu_count = count; route_menu_active = true;
     tui.menu = tui_menu_create(count ? count * 2 : 1); tui.menu->callback = on_route_rule_selected;
     update_route_menu();
-    if (!count) { wstring_printf(&tui.menu->items[0].wstr, L"No rules. Press r, select ports, then a to save a rule"); tui.menu->items[0].data.uint = PW_ID_ANY; }
+    if (!count) { wstring_printf(&tui.menu->items[0].wstr, trw(L"No rules. Press r, select ports, then a to save a rule")); tui.menu->items[0].data.uint = PW_ID_ANY; }
     else for (unsigned i = 0; i < count * 2; i++) tui.menu->items[i].data.uint = i;
     tui_menu_resize(tui.menu, tui.term_width, tui.term_height); tui.menu_active = true;
 }
 
 void tui_bind_manage_scenes(union tui_bind_data data) {
     if (tui.menu_active || tui.routing_active) return;
-    if (scene_pending || audio_pending.active) { show_notice("Wait for the current audio operation to finish"); return; }
+    if (scene_pending || audio_pending.active) { show_notice(tr("Wait for the current audio operation to finish")); return; }
     int result = scene_list(&scene_names, &scene_count);
     if (result < 0) { show_notice(strerror(-result)); return; }
     char *startup = scene_startup_get();
-    if (!startup) { scene_list_free(scene_names, scene_count); scene_names = NULL; scene_count = 0; show_notice("Cannot read startup scene selection"); return; }
+    if (!startup) { scene_list_free(scene_names, scene_count); scene_names = NULL; scene_count = 0; show_notice(tr("Cannot read startup scene selection")); return; }
     tui.menu = tui_menu_create(2 + scene_count * 3);
     tui.menu->callback = on_scene_selected;
-    wstring_printf(&tui.menu->header, L"Scenes | startup: %s", startup);
+    wstring_printf(&tui.menu->header, trw(L"Scenes | startup: %s"), streq(startup, "off") ? tr("off") : startup);
     free(startup);
-    wstring_printf(&tui.menu->items[0].wstr, L"Save current setup as a new scene");
+    wstring_printf(&tui.menu->items[0].wstr, trw(L"Save current setup as a new scene"));
     tui.menu->items[0].data.uint = 0;
     for (unsigned i = 0; i < scene_count; i++) {
-        wstring_printf(&tui.menu->items[1 + i * 3].wstr, L"Load %s", scene_names[i]);
+        wstring_printf(&tui.menu->items[1 + i * 3].wstr, trw(L"Load %s"), scene_names[i]);
         tui.menu->items[1 + i * 3].data.uint = 1 + i * 3;
-        wstring_printf(&tui.menu->items[2 + i * 3].wstr, L"Delete %s", scene_names[i]);
+        wstring_printf(&tui.menu->items[2 + i * 3].wstr, trw(L"Delete %s"), scene_names[i]);
         tui.menu->items[2 + i * 3].data.uint = 2 + i * 3;
-        wstring_printf(&tui.menu->items[3 + i * 3].wstr, L"Restore %s on startup", scene_names[i]);
+        wstring_printf(&tui.menu->items[3 + i * 3].wstr, trw(L"Restore %s on startup"), scene_names[i]);
         tui.menu->items[3 + i * 3].data.uint = 3 + i * 3;
     }
-    wstring_printf(&tui.menu->items[1 + scene_count * 3].wstr, L"Disable startup scene restoration");
+    wstring_printf(&tui.menu->items[1 + scene_count * 3].wstr, trw(L"Disable startup scene restoration"));
     tui.menu->items[1 + scene_count * 3].data.uint = PW_ID_ANY;
     tui_menu_resize(tui.menu, tui.term_width, tui.term_height); tui.menu_active = true;
 }
@@ -1363,14 +1374,14 @@ static bool effect_editable(const struct graph_node *node, const struct graph_co
 
 static void open_effect_parameters(uint32_t id) {
     const struct graph_node *node = graph_node_find(id);
-    if (!node) { show_notice("Effect disappeared"); return; }
-    if (!node->controls_ready) { show_notice("Effect parameters are loading; press e again"); return; }
+    if (!node) { show_notice(tr("Effect disappeared")); return; }
+    if (!node->controls_ready) { show_notice(tr("Effect parameters are loading; press e again")); return; }
     unsigned count = 0;
     for (unsigned i = 0; i < node->n_controls; i++) {
         const struct graph_control *c = &node->controls[i];
         if (effect_editable(node, c)) count++;
     }
-    if (!count) { show_notice("This effect has no editable plugin parameters"); return; }
+    if (!count) { show_notice(tr("This effect has no editable plugin parameters")); return; }
     tui.menu = tui_menu_create(count);
     tui.menu->callback = on_effect_reset;
     count = 0;
@@ -1392,7 +1403,7 @@ static bool effect_key(wint_t key) {
     if (key == ' ') {
         const struct graph_control *wet = graph_control_find(node, "wet:Mult");
         const struct graph_control *dry = graph_control_find(node, "dry:Mult");
-        if (!wet || !dry) { show_notice("This custom chain has no wet/dry bypass"); return true; }
+        if (!wet || !dry) { show_notice(tr("This custom chain has no wet/dry bypass")); return true; }
         const char *names[] = {"wet:Mult", "dry:Mult"};
         const double values[] = {wet->value == 0 && dry->value == 1 ? 1 : 0,
                                  wet->value == 0 && dry->value == 1 ? 0 : 1};
@@ -1443,18 +1454,18 @@ void tui_bind_manage_effects(union tui_bind_data data) {
         if (streq(dict_get(&graph_node_find(candidates.ids[i])->props, "pipemixer.kind"), "effect")) count++;
     tui.menu = tui_menu_create(count + 3);
     tui.menu->callback = on_effect_selected;
-    wstring_printf(&tui.menu->header, L"Effect chains: create or edit");
-    wstring_printf(&tui.menu->items[0].wstr, L"Create a three-band stereo equalizer");
-    wstring_printf(&tui.menu->items[1].wstr, L"Create a voice chain (high-pass, noise gate, presence EQ)");
+    wstring_printf(&tui.menu->header, trw(L"Effect chains: create or edit"));
+    wstring_printf(&tui.menu->items[0].wstr, trw(L"Create a three-band stereo equalizer"));
+    wstring_printf(&tui.menu->items[1].wstr, trw(L"Create a voice chain (high-pass, noise gate, presence EQ)"));
     tui.menu->items[0].data.uint = PW_ID_ANY;
     tui.menu->items[1].data.uint = PW_ID_ANY - 1;
-    wstring_printf(&tui.menu->items[2].wstr,L"Create an empty chain");
+    wstring_printf(&tui.menu->items[2].wstr,trw(L"Create an empty chain"));
     tui.menu->items[2].data.uint=PW_ID_ANY-2;
     count = 3;
     for (unsigned i = 0; i < candidates.count; i++) {
         node = graph_node_find(candidates.ids[i]);
         if (!streq(dict_get(&node->props, "pipemixer.kind"), "effect")) continue;
-        wstring_printf(&tui.menu->items[count].wstr, L"Edit %s", dict_get(&node->props, "pipemixer.group"));
+        wstring_printf(&tui.menu->items[count].wstr, trw(L"Edit %s"), dict_get(&node->props, "pipemixer.group"));
         tui.menu->items[count++].data.uint = node->id;
     }
     free(candidates.ids);
@@ -1498,14 +1509,14 @@ void tui_bind_select_profile(union tui_bind_data data) {
 
     tui_menu_resize(tui.menu, tui.term_width, tui.term_height);
 
-    wstring_printf(&tui.menu->header, L"Select profile for %ls", d->description.data);
+    wstring_printf(&tui.menu->header, trw(L"Select profile for %ls"), d->description.data);
 
     for (size_t i = 0; i < d->n_profiles; i++) {
         const struct profile_info *p = &d->profiles[i];
         struct tui_menu_item *item = &tui.menu->items[i];
 
         wstring_printf(&item->wstr, L"%d. %ls (%ls)",
-                       p->index, p->description.data, p->name.data);
+                       p->index, trw(p->description.data), p->name.data);
         item->data.uint = p->index;
 
         if (p == d->active_profile) {
@@ -1552,14 +1563,14 @@ void tui_bind_select_route(union tui_bind_data data) {
 
     tui_menu_resize(tui.menu, tui.term_width, tui.term_height);
 
-    wstring_printf(&tui.menu->header, L"Select route for %ls", d->description.data);
+    wstring_printf(&tui.menu->header, trw(L"Select route for %ls"), d->description.data);
 
     for (size_t i = 0; i < d->n_routes; i++) {
         const struct route_info *p = &d->routes[i];
         struct tui_menu_item *item = &tui.menu->items[i];
 
         wstring_printf(&item->wstr, L"%d. %ls (%ls)",
-                       p->index, p->description.data, p->name.data);
+                       p->index, trw(p->description.data), p->name.data);
         item->data.uint = p->index;
 
         if (p == d->active_route) {
@@ -2011,7 +2022,7 @@ static void mouse_scroll_current_tab(int direction) {
 static void mouse_select_tab(int x) {
     int start = 0;
     FOR_EACH_TAB(i) {
-        const int end = start + (int)strlen(tui_tab_name(tui.tabs[i].type)) + 3;
+        const int end = start + tui_text_width(tui_tab_name(tui.tabs[i].type)) + 3;
         if (x >= start && x < end) {
             tui_bind_set_tab_index((union tui_bind_data){ .index = i });
             return;
@@ -2166,6 +2177,12 @@ static void on_stdin_ready(void *_, int _, uint32_t _) {
             trigger_update();
             continue;
         }
+        struct tui_bind *language_bind = map_get(&config.binds, ch);
+        if (language_bind && language_bind->func == tui_bind_toggle_language) {
+            language_bind->func(language_bind->data);
+            trigger_update();
+            continue;
+        }
         if (ch == KEY_RESIZE) {
             WARN("KEY_RESIZE %s (%d)", key_name_from_key_code(ch), ch);
         }
@@ -2255,26 +2272,26 @@ static void on_peak_timer(void *_, uint64_t _) {
         char error[256] = {0};
         int result = scene_step(scene_pending, error, sizeof(error));
         if (result == -EAGAIN && time(NULL) >= scene_deadline) {
-            result = -ETIMEDOUT; snprintf(error, sizeof(error), "Scene loading timed out");
+            result = -ETIMEDOUT; snprintf(error, sizeof(error), tr("Scene loading timed out"));
         }
         if (result != -EAGAIN) {
             scene_job_free(scene_pending, result < 0); scene_pending = NULL;
-            show_notice(result < 0 ? (error[0] ? error : strerror(-result)) : "Scene loaded"); changed = true;
+            show_notice(result < 0 ? (error[0] ? error : strerror(-result)) : tr("Scene loaded")); changed = true;
         }
     }
     if (audio_pending.active) {
         if (managed_child_status(audio_pending.pid) != -EAGAIN) {
-            show_notice("Audio worker stopped; inspect its log in XDG_RUNTIME_DIR");
+            show_notice(tr("Audio worker stopped; inspect its log in XDG_RUNTIME_DIR"));
             audio_pending.active = false; changed = true;
         } else if (managed_child_ready(audio_pending.pid) && managed_ready(audio_pending.kind, audio_pending.name)) {
             char message[256];
             if (streq(audio_pending.kind, "effect"))
-                snprintf(message, sizeof(message), "Created effect %s; press e to edit, r to route audio", audio_pending.name);
-            else snprintf(message, sizeof(message), "Created %s %s; adjust its output volume to control this path", audio_pending.kind, audio_pending.name);
+                snprintf(message, sizeof(message), tr("Created effect %s; press e to edit, r to route audio"), audio_pending.name);
+            else snprintf(message, sizeof(message), tr("Created %s %s; adjust its output volume to control this path"), tr(audio_pending.kind), audio_pending.name);
             show_notice(message); audio_pending.active = false; changed = true;
         } else if (time(NULL) >= audio_pending.deadline) {
             managed_cancel(audio_pending.pid);
-            show_notice("Audio path creation timed out");
+            show_notice(tr("Audio path creation timed out"));
             audio_pending.active = false; changed = true;
         }
     }
@@ -2320,7 +2337,7 @@ static void on_update_triggered(void *_, uint64_t _) {
         else { wresize(notice_win, 1, tui.term_width); mvwin(notice_win, tui.term_height - 1, 0); }
         if (notice_win) {
             werase(notice_win);
-            waddnstr(notice_win, notice, MAX(0, tui.term_width - 1));
+            tui_write_text(notice_win, 0, 0, notice, MAX(0, tui.term_width - 1));
             wnoutrefresh(notice_win);
         }
     }
@@ -2334,6 +2351,7 @@ static void on_sigwinch(int _) {
 }
 
 bool tui_init(void) {
+    i18n_init(config.language);
     /* must set signal handler BEFORE ncurses init */
     sigaction(SIGWINCH, &(struct sigaction){
         .sa_handler = on_sigwinch,

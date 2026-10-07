@@ -15,6 +15,16 @@ pipemixer will look for a configuration file in the following locations:
 General options.
 
 .PP
+.B language
+.RS 4
+TUI language: auto (default), en, or zh_CN (also zh-CN or zh).
+The PIPEMIXER_LANGUAGE environment variable overrides this setting.
+Auto uses LC_ALL, LC_MESSAGES, then LANG; Chinese locales select Simplified
+Chinese and other locales select English. Chinese requires a UTF-8 locale.
+An explicitly selected byte locale such as LC_ALL=C keeps English active.
+CLI command names and JSON output are independent of the UI language.
+.RE
+.PP
 .B volume-step
 .RS 4
 Volume change step as percentage (1 means 1%). Default: 1.
@@ -53,7 +63,7 @@ All printable ASCII/Unicode characters.
 .br
 Example: tab-next=t
 .IP \(bu 4
-Special keys: up, down, left, right, enter, tab, backtab, space, backspace, escape.
+Special keys: up, down, left, right, enter, tab, backtab, space, backspace, escape, f1 through f12.
 .br
 Example: tab-prev=backtab
 .IP \(bu 4
@@ -61,6 +71,13 @@ Arbitrary keycodes with code:N, where N is a decimal number.
 .br
 Example: quit=code:185
 
+.PP
+.B toggle-language
+.RS 4
+Switch between English and Simplified Chinese. Default: f2.
+Closes the current menu without interrupting running audio, fades or recordings.
+This changes only the current TUI session and does not update the INI file.
+.RE
 .PP
 .B focus-down, focus-up, focus-first, focus-last
 .RS 4

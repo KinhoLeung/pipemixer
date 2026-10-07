@@ -158,6 +158,7 @@ void tui_bind_select_route(union tui_bind_data data);
 void tui_bind_select_target(union tui_bind_data data);
 void tui_bind_select_profile(union tui_bind_data data);
 void tui_bind_toggle_routing(union tui_bind_data data);
+void tui_bind_toggle_language(union tui_bind_data data);
 void tui_bind_manage_audio(union tui_bind_data data);
 void tui_bind_manage_effects(union tui_bind_data data);
 void tui_bind_manage_scenes(union tui_bind_data data);

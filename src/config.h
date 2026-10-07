@@ -5,6 +5,7 @@
 #include "collections/map.h"
 #include "tui/tui.h"
 #include "format.h"
+#include "i18n.h"
 
 struct pipemixer_config {
     float volume_step;
@@ -12,6 +13,7 @@ struct pipemixer_config {
 
     bool wraparound;
     bool mouse;
+    enum ui_language language;
 
     wchar_t bar_full_char[2], bar_empty_char[2];
     struct {
@@ -37,4 +39,3 @@ extern struct pipemixer_config config;
 
 /* returns false if any errors were encountered */
 bool load_config(const char *config_path);
-

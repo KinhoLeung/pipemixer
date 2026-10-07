@@ -1,5 +1,18 @@
 # Board integration tests
 
+The localization text/locale test also runs on a native host with UTF-8 locales
+and ncursesw. It checks malformed UTF-8 without mutating an existing string,
+translated parameter IDs and positional formats, and actual curses cells at
+the right edge of a clipped Chinese label:
+
+```sh
+cc -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -Isrc \
+  $(pkg-config --cflags ncursesw) tests/i18n_test.c src/i18n.c src/tui/text.c \
+  src/collections/wstring.c src/xmalloc.c -o /tmp/pipemixer-i18n-test \
+  $(pkg-config --libs ncursesw)
+ASAN_OPTIONS=detect_leaks=0 /tmp/pipemixer-i18n-test
+```
+
 Run against an existing PipeWire session with WirePlumber, Python 3, `pw-cli`,
 `pw-link` and `pw-dump`. The PCM suites also need `audio-probe` and the loopback,
 filter-chain and builtin filter plugins. Tests use isolated virtual nodes and
@@ -26,6 +39,8 @@ the board. Mark both binaries executable, then run on the board:
 ```sh
 export XDG_RUNTIME_DIR=/run/user/0
 export PIPEMIXER_BINARY=/tmp/board/pipemixer
+export PIPEMIXER_LANGUAGE=en
+python3 /tmp/board/board_i18n.py
 python3 /tmp/board/board_graph.py
 python3 /tmp/board/board_routing.py
 python3 /tmp/board/board_routing_groups.py
@@ -54,6 +69,11 @@ python3 /tmp/board/board_monitor_ui.py
 ```
 
 - Graph: compare ports/links with `pw-dump`; observe external links and removal.
+- Localization: isolated Chinese/English config and locale selection, F2 across
+  panels and during a fade, Chinese search and mouse tab geometry, narrow CJK
+  menu borders, real effect parameter edits and monitor/Solo controls, WAV
+  finalization with Unicode paths, byte-locale fallback and unchanged JSON.
+  The suite selects its own language and restores its inherited environment.
 - Routing: native links, fan-out, idempotency, feedback rejection, keyboard and
   mouse matrix control, terminal resizing and endpoint removal/reappearance.
 - Routing groups: node/type headers, independently folded axes, class filters,

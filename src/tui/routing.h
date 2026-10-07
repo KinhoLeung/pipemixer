@@ -1,5 +1,7 @@
 #pragma once
 
+void routing_language_changed(void);
+
 #include <ncurses.h>
 #include <stdint.h>
 

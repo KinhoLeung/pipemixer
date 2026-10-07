@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -53,9 +54,9 @@ static const char *source_name(void) {
 static bool edit(enum monitor_action action, const char *value, const char *const *sources, unsigned count) {
     char error[256] = {0};
     if (monitor_edit(selected, action, value, sources, count, error, sizeof(error)) < 0) { tui_notice(error); return false; }
-    if (!route_rules_running()) tui_notice("Monitor configuration saved; start the audio service to apply it");
-    else if (action == MONITOR_LISTEN && current() && current()->n_solo) tui_notice("Listening source saved; clear Solo to hear it");
-    else tui_notice("Monitor updated");
+    if (!route_rules_running()) tui_notice(tr("Monitor configuration saved; start the audio service to apply it"));
+    else if (action == MONITOR_LISTEN && current() && current()->n_solo) tui_notice(tr("Listening source saved; clear Solo to hear it"));
+    else tui_notice(tr("Monitor updated"));
     return true;
 }
 static void close_menu(void) { tui_bind_cancel_selection((union tui_bind_data){0}); }
@@ -148,7 +149,7 @@ static void open_nodes(enum monitor_view next) {
         for (unsigned i = 0; i < count; i++) add_node(list[i]);
     }
     if (n_nodes > 1) qsort(nodes, n_nodes, sizeof(*nodes), compare_names);
-    if (!n_nodes) { monitor_ui_cancel(); tui_notice("No matching audio nodes available"); return; }
+    if (!n_nodes) { monitor_ui_cancel(); tui_notice(tr("No matching audio nodes available")); return; }
     view = next; tui.menu = tui_menu_create(n_nodes); tui.menu->callback = choose_node;
     for (unsigned i = 0; i < n_nodes; i++) tui.menu->items[i].data.uint = i;
     if (destination && tui.routing_active) {
@@ -163,35 +164,35 @@ static void update_menu(void) {
     for (unsigned i=0;i<tui.menu->n_items;i++) wstring_clear(&tui.menu->items[i].wstr);
     struct monitor *m = current();
     if (view == LIST) {
-        wstring_printf(&tui.menu->header, L"Independent monitors | engine: %s", route_rules_running() ? "running" : "stopped");
+        wstring_printf(&tui.menu->header, trw(L"Independent monitors | engine: %s"), tr(route_rules_running() ? "running" : "stopped"));
         for (unsigned i = 0; i < n_configs && i < tui.menu->n_items - 1; i++) {
             unsigned connected, total; const char *state = monitor_state(&configs[i], &connected, &total);
             wstring_printf(&tui.menu->items[i].wstr, L"%s%s [%s %s %u/%u] -> %s", streq(configs[i].name, selected) ? "* " : "", configs[i].name,
-                state, monitor_mode(&configs[i]), connected, total, configs[i].destination);
+                tr(state), tr(monitor_mode(&configs[i])), connected, total, configs[i].destination);
         }
-        wstring_printf(&tui.menu->items[tui.menu->n_items - 1].wstr, L"Create monitor... (choose output device)");
+        wstring_printf(&tui.menu->items[tui.menu->n_items - 1].wstr, trw(L"Create monitor... (choose output device)"));
         return;
     }
     if (view == DESTINATION) {
-        wstring_printf(&tui.menu->header, L"Monitor output | initial source: %s", create_source ?: "empty mix");
+        wstring_printf(&tui.menu->header, trw(L"Monitor output | initial source: %s"), create_source ?: tr("empty mix"));
     } else if (!m) {
-        wstring_printf(&tui.menu->header, L"Monitor removed; Esc to close"); return;
+        wstring_printf(&tui.menu->header, trw(L"Monitor removed; Esc to close")); return;
     } else if (view == DETAIL) {
         unsigned connected, total; const char *state = monitor_state(m, &connected, &total);
-        wstring_printf(&tui.menu->header, L"Monitor %s | %s %s %u/%u | engine: %s", selected, state, monitor_mode(m), connected, total, route_rules_running() ? "running" : "stopped");
-        wstring_printf(&tui.menu->items[0].wstr, L"Listen to normal mix (%u sources)%s", m->n_sources, !m->listen ? " [selected]" : "");
-        wstring_printf(&tui.menu->items[1].wstr, L"Select listening source... [%s]", m->listen ?: "normal mix");
-        wstring_printf(&tui.menu->items[2].wstr, L"Edit normal mix sources... (%u)", m->n_sources);
-        wstring_printf(&tui.menu->items[3].wstr, L"Edit Solo sources... (%u)", m->n_solo);
-        wstring_printf(&tui.menu->items[4].wstr, L"Clear all Solo; return to %s", m->listen ?: "normal mix");
-        wstring_printf(&tui.menu->items[5].wstr, L"%s monitor", m->enabled ? "Disable" : "Enable");
-        wstring_printf(&tui.menu->items[6].wstr, L"Delete monitor %s", selected); return;
-    } else wstring_printf(&tui.menu->header, L"%s %s | Enter %s; Esc closes", selected,
-        view == MIX ? "normal mix sources" : view == SOLO ? "Solo sources" : "listening source", view == LISTEN ? "selects" : "toggles");
+        wstring_printf(&tui.menu->header, trw(L"Monitor %s | %s %s %u/%u | engine: %s"), selected, tr(state), tr(monitor_mode(m)), connected, total, tr(route_rules_running() ? "running" : "stopped"));
+        wstring_printf(&tui.menu->items[0].wstr, trw(L"Listen to normal mix (%u sources)%s"), m->n_sources, !m->listen ? tr(" [selected]") : "");
+        wstring_printf(&tui.menu->items[1].wstr, trw(L"Select listening source... [%s]"), m->listen ?: tr("normal mix"));
+        wstring_printf(&tui.menu->items[2].wstr, trw(L"Edit normal mix sources... (%u)"), m->n_sources);
+        wstring_printf(&tui.menu->items[3].wstr, trw(L"Edit Solo sources... (%u)"), m->n_solo);
+        wstring_printf(&tui.menu->items[4].wstr, trw(L"Clear all Solo; return to %s"), m->listen ?: tr("normal mix"));
+        wstring_printf(&tui.menu->items[5].wstr, trw(L"%s monitor"), tr(m->enabled ? "Disable" : "Enable"));
+        wstring_printf(&tui.menu->items[6].wstr, trw(L"Delete monitor %s"), selected); return;
+    } else wstring_printf(&tui.menu->header, trw(L"%s %s | Enter %s; Esc closes"), selected,
+        view == MIX ? tr("normal mix sources") : view == SOLO ? tr("Solo sources") : tr("listening source"), tr(view == LISTEN ? "selects" : "toggles"));
     for (unsigned i = 0; i < n_nodes && i < tui.menu->n_items; i++) {
         bool on = m && (view == MIX ? contains(m->sources, m->n_sources, nodes[i]) : view == SOLO ? contains(m->solo, m->n_solo, nodes[i]) : streq(m->listen, nodes[i]));
         uint32_t id; bool missing = graph_resolve_node(nodes[i], &id) < 0;
-        wstring_printf(&tui.menu->items[i].wstr, L"[%s] %s%s", on ? "x" : " ", nodes[i], missing ? " (offline)" : "");
+        wstring_printf(&tui.menu->items[i].wstr, L"[%s] %s%s", on ? "x" : " ", nodes[i], missing ? tr(" (offline)") : "");
     }
 }
 void tui_bind_manage_monitors(union tui_bind_data data) {
@@ -203,13 +204,13 @@ void tui_bind_manage_monitors(union tui_bind_data data) {
 }
 static bool selected_monitor(void) {
     if (tui.menu_active || !load()) return false;
-    if (!current()) { tui_notice("Press M to create or select a monitor first"); return false; }
+    if (!current()) { tui_notice(tr("Press M to create or select a monitor first")); return false; }
     return true;
 }
 void tui_bind_monitor_solo(union tui_bind_data data) {
     if (!selected_monitor()) return;
     const char *source = source_name();
-    if (!source) { tui_notice("Select a source node or output port before toggling Solo"); return; }
+    if (!source) { tui_notice(tr("Select a source node or output port before toggling Solo")); return; }
     edit(MONITOR_SOLO_TOGGLE, source, NULL, 0);
 }
 void tui_bind_monitor_listen(union tui_bind_data data) {
@@ -231,7 +232,7 @@ bool monitor_ui_poll(void) {
     struct monitor *m = current(); char label[128] = {0};
     if (m) {
         unsigned connected, total; const char *state = monitor_state(m, &connected, &total);
-        snprintf(label, sizeof(label), "Monitor:%s %s [%u Solo] %s", m->name, monitor_mode(m), m->n_solo, state);
+        snprintf(label, sizeof(label), tr("Monitor:%s %s [%u Solo] %s"), m->name, tr(monitor_mode(m)), m->n_solo, tr(state));
     }
     bool changed = !streq(last_label, label); snprintf(last_label, sizeof(last_label), "%s", label);
     routing_monitor_status(label); return view != CLOSED || (tui.routing_active && changed);

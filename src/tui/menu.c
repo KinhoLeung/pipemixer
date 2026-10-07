@@ -2,6 +2,7 @@
 #include "xmalloc.h"
 #include "config.h"
 #include "log.h"
+#include "tui/text.h"
 
 void tui_menu_resize(struct tui_menu *const menu, int term_width, int term_height) {
     menu->x = 1;
@@ -87,7 +88,7 @@ void tui_menu_draw(const struct tui_menu *const menu) {
         waddwstr(win, config.borders.rs);
     }
 
-    mvwaddnwstr(win, 0, 1, menu->header.data, menu->w - 2);
+    tui_write_wide(win, 0, 1, menu->header.data, menu->w - 2);
     const unsigned int visible = menu->h > 2 ? (unsigned int)(menu->h - 2) : 0;
     const unsigned int first = tui_menu_first_visible(menu);
     for (unsigned int row = 0; row < visible && first + row < menu->n_items; row++) {
@@ -96,7 +97,7 @@ void tui_menu_draw(const struct tui_menu *const menu) {
             wattron(win, A_BOLD);
         }
 
-        mvwaddnwstr(win, 1 + row, 1, menu->items[i].wstr.data, menu->w - 2);
+        tui_write_wide(win, 1 + row, 1, menu->items[i].wstr.data, menu->w - 2);
 
         wattroff(win, A_BOLD);
     }

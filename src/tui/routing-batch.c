@@ -1,3 +1,4 @@
+#include "i18n.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -92,7 +93,7 @@ int routing_batch_start(struct routing_batch *batch, const struct routing_marks 
     static unsigned sequence;
     snprintf(batch->tag, sizeof(batch->tag), "%ld:%" PRIu64 ":%u", (long)getpid(), now(), sequence++);
     batch->active = true;
-    snprintf(batch->message, sizeof(batch->message), "Batch %s: 0/%u (%u ports without channel partners)", disconnect ? "disconnect" : "connect", batch->count, batch->skipped);
+    snprintf(batch->message, sizeof(batch->message), tr("Batch %s: 0/%u (%u ports without channel partners)"), tr(disconnect ? "disconnect" : "connect"), batch->count, batch->skipped);
     return 0;
 }
 static void remove_owned(const struct graph_link *link, void *data) {
@@ -100,13 +101,13 @@ static void remove_owned(const struct graph_link *link, void *data) {
     if (link->info && link->info->props && streq(spa_dict_lookup(link->info->props, "pipemixer.batch"), batch->tag)) graph_destroy_link(link->id);
 }
 static void progress(struct routing_batch *batch) {
-    snprintf(batch->message, sizeof(batch->message), "Batch %s: %u/%u | Esc cancels",
-        batch->disconnect ? "disconnect" : "connect", batch->position, batch->count);
+    snprintf(batch->message, sizeof(batch->message), tr("Batch %s: %u/%u | Esc cancels"),
+        tr(batch->disconnect ? "disconnect" : "connect"), batch->position, batch->count);
 }
 void routing_batch_abort(struct routing_batch *batch, const char *reason) {
     if (!batch->active || batch->rollback) return;
-    snprintf(batch->message, sizeof(batch->message), "Batch %s after %u/%u: %.130s%s", batch->disconnect ? "stopped" : "rolled back",
-        batch->position, batch->count, reason, batch->disconnect ? "" : "; existing links retained");
+    snprintf(batch->message, sizeof(batch->message), tr("Batch %s after %u/%u: %.130s%s"), batch->disconnect ? tr("stopped") : tr("rolled back"),
+        batch->position, batch->count, tr(reason), batch->disconnect ? "" : tr("; existing links retained"));
     batch->rollback = true; batch->deadline = now() + 1000;
     if (!batch->disconnect) graph_foreach_link(remove_owned, batch);
 }
@@ -119,20 +120,20 @@ bool routing_batch_step(struct routing_batch *batch) {
     }
     if (batch->position == batch->count) {
         batch->active = false;
-        snprintf(batch->message, sizeof(batch->message), "Batch %s complete: %u pairs (%u already %s, %u ports without partners)%s",
-            batch->disconnect ? "disconnect" : "connect", batch->count, batch->unchanged,
-            batch->disconnect ? "absent" : "connected", batch->skipped,
-            batch->disconnect ? "; enabled rules may reconnect" : "");
+        snprintf(batch->message, sizeof(batch->message), tr("Batch %s complete: %u pairs (%u already %s, %u ports without partners)%s"),
+            tr(batch->disconnect ? "disconnect" : "connect"), batch->count, batch->unchanged,
+            tr(batch->disconnect ? "absent" : "connected"), batch->skipped,
+            batch->disconnect ? tr("; enabled rules may reconnect") : "");
         return true;
     }
     const struct graph_pair *pair = &batch->pairs[batch->position];
-    if (!graph_port_find(pair->output) || !graph_port_find(pair->input)) { routing_batch_abort(batch, "endpoint disappeared"); return true; }
+    if (!graph_port_find(pair->output) || !graph_port_find(pair->input)) { routing_batch_abort(batch, tr("endpoint disappeared")); return true; }
     const struct graph_link *link = graph_link_between(pair->output, pair->input);
     if (batch->waiting) {
         if ((!batch->disconnect && link && link->info->state >= PW_LINK_STATE_PAUSED)
             || (batch->disconnect && !link)) { batch->position++; batch->waiting = false; progress(batch); }
         else if ((!batch->disconnect && link && link->info->state == PW_LINK_STATE_ERROR) || now() >= batch->deadline) {
-            routing_batch_abort(batch, link && link->info->error ? link->info->error : "connection timed out");
+            routing_batch_abort(batch, link && link->info->error ? link->info->error : tr("connection timed out"));
         }
         return true;
     }
@@ -140,7 +141,7 @@ bool routing_batch_step(struct routing_batch *batch) {
         batch->unchanged++; batch->position++; progress(batch); return true;
     }
     int result = batch->disconnect ? graph_disconnect(pair->output, pair->input) : graph_connect_batch(pair->output, pair->input, batch->tag);
-    if (result < 0) routing_batch_abort(batch, result == -ELOOP ? "feedback loop" : strerror(-result));
+    if (result < 0) routing_batch_abort(batch, result == -ELOOP ? tr("feedback loop") : strerror(-result));
     else { batch->waiting = true; batch->deadline = now() + 3000; }
     return true;
 }

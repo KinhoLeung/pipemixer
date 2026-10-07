@@ -204,6 +204,12 @@ static bool bool_parser(struct parser_context ctx, void *_out) {
     }
 }
 
+static bool language_parser(struct parser_context ctx, void *out) {
+    if (i18n_parse_language(ctx.val, out)) return true;
+    PARSER_ERROR(ctx, "language must be auto, en or zh_CN");
+    return false;
+}
+
 static bool format_parser(struct parser_context ctx, void *_out) {
     struct format **out = _out;
 
@@ -238,6 +244,7 @@ static const struct section_handler section_handlers[] = {
             { "volume-max", percentage_parser, &config.volume_max },
             { "wraparound", bool_parser, &config.wraparound },
             { "mouse", bool_parser, &config.mouse },
+            { "language", language_parser, &config.language },
             { "tab-order", tab_order_parser, &config.tabs },
             { "default-tab", tab_parser, &config.default_tab },
             { 0 }
@@ -360,6 +367,8 @@ static bool parse_bind(struct parser_context ctx) {
         ADD_BIND(keycode, tui_bind_select_profile, nothing, NOTHING);
     } else if (streq(ctx.key, "toggle-routing")) {
         ADD_BIND(keycode, tui_bind_toggle_routing, nothing, NOTHING);
+    } else if (streq(ctx.key, "toggle-language")) {
+        ADD_BIND(keycode, tui_bind_toggle_language, nothing, NOTHING);
     } else if (streq(ctx.key, "manage-audio")) {
         ADD_BIND(keycode, tui_bind_manage_audio, nothing, NOTHING);
     } else if (streq(ctx.key, "manage-effects")) {
